@@ -2,12 +2,15 @@
 
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <string>
 
 #include <rc_client.h>
 
 namespace ShipwrightRA {
+
+class RetroAchievementsHttp;
 
 enum class RetroAchievementsAuthState {
     LoggedOut,
@@ -76,6 +79,8 @@ class RetroAchievementsManager final {
     // Processes one logical Shipwright game update through the rcheevos runtime.
     // Does nothing until a RetroAchievements game is fully loaded.
     void DoFrame();
+    void Idle();
+    void ResetRuntime();
 
   private:
     RetroAchievementsManager() = default;
@@ -93,6 +98,7 @@ class RetroAchievementsManager final {
     void SetGameState(RetroAchievementsGameState state, std::string error = {});
 
     rc_client_t* mClient = nullptr;
+    std::unique_ptr<RetroAchievementsHttp> mHttp;
 
     mutable std::mutex mAuthMutex;
     RetroAchievementsAuthState mAuthState = RetroAchievementsAuthState::LoggedOut;

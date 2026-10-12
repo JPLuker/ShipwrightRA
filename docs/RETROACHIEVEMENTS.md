@@ -14,7 +14,7 @@ ShipwrightRA RetroAchievementsManager
         |
         +--> N64-compatible memory adapter
         |
-        +--> HTTP transport (planned)
+        +--> queued libcurl HTTP transport
         |
         v
 rcheevos rc_client
@@ -43,28 +43,28 @@ The project-local CMake hook is used so the experiment does not require invasive
 - [x] Add a ShipwrightRA-owned client lifecycle wrapper
 - [x] Add rcheevos logging through Shipwright's spdlog logger
 - [x] Add safe memory callback backed by the compatibility adapter
-- [x] Add safe placeholder server callback
+- [x] Add queued HTTP server callback with an explicit unsupported-platform fallback
 - [x] Disable Hardcore by default until Shipwright-specific restrictions exist
 - [x] Wire the manager into Shipwright startup through `RegisterShipInitFunc`
 - [ ] Verify all supported desktop builds
 
 ### Phase 0.2 - Account connection
 
-- [ ] Implement HTTP transport for `rc_client_server_call_t`
-- [ ] Login with RetroAchievements credentials/token
+- [x] Implement nonblocking, frame-pumped HTTP transport for `rc_client_server_call_t`
+- [x] Implement password/token login API and development token hook (live-account validation pending)
 - [ ] Persist authentication without storing plaintext passwords
-- [ ] Expose connection state and username to Shipwright
-- [ ] Handle network/API failures without impacting game startup
+- [x] Expose authentication state and username through the manager API
+- [x] Queue network requests without waiting for responses during startup/gameplay
 
 ### Phase 0.3 - Game identification
 
 - [x] Add an offline N64 ROM hash probe using rcheevos' hashing implementation
 - [ ] Locate the original user-provided OoT ROM used for asset extraction automatically
-- [ ] Resolve the hash through RetroAchievements
+- [x] Implement hash resolution and set loading through `rc_client` (live-ROM validation pending)
 - [ ] Confirm the existing Ocarina of Time game/set is identified
 - [ ] Test supported OoT ROM revisions
 
-For development, `SHIPWRIGHT_RA_ROM_PATH` may be set to a local OoT ROM. On startup the fork will generate the RetroAchievements Nintendo 64 hash and write it to the normal application log. The path itself is not logged.
+For development, `SHIPWRIGHT_RA_ROM_PATH` may be set to a local OoT ROM. After token login succeeds and a save is active, the fork generates the RetroAchievements Nintendo 64 hash and asks `rc_client` to load the matching set. The hash is written to the normal application log. The path itself is not logged.
 
 Example on Linux/macOS:
 
@@ -79,7 +79,11 @@ $env:SHIPWRIGHT_RA_ROM_PATH="C:\path\to\oot.z64"
 .\soh.exe
 ```
 
-This environment-variable hook is intentionally temporary developer scaffolding, not the planned user-facing configuration.
+Set `SHIPWRIGHT_RA_USERNAME` and `SHIPWRIGHT_RA_TOKEN` in the launching process as well. The token must be a RetroAchievements client login token, not a Web API key. Do not put credentials in source files, screenshots, or bug reports. No password or token is persisted by this scaffold.
+
+Login progresses at the title screen. Set loading waits for an active save because rcheevos validates memory addresses during activation; loading without live scene data would incorrectly mark some achievements unsupported. Exiting a save unloads the set, and entering another save starts a fresh load.
+
+These environment-variable hooks are temporary developer scaffolding, not the planned user-facing configuration.
 
 ### Phase 0.4 - Memory research
 
@@ -112,14 +116,14 @@ See `docs/RA_MEMORY_MAP.md` for the compatibility notes and address derivations.
 - [x] Return invalid/unmapped reads safely
 - [x] Map the original SaveContext bootstrap region through health/magic/rupees
 - [x] Map current scene, dialog ID, and main BGM sequence
-- [ ] Expand inventory/equipment/event flag regions
+- [x] Serialize inventory/equipment and event flag regions (gameplay parity validation pending)
 - [ ] Support all memory regions used by the existing 97-achievement base set
 - [ ] Add deterministic tests for mapped addresses
 
 ### Phase 0.6 - First real achievement
 
 - [ ] Load the existing OoT achievement set unchanged
-- [ ] Evaluate frames through `rc_client_do_frame`
+- [x] Wire `rc_client_do_frame` to logical game updates while a normal save is active
 - [ ] Trigger at least one existing achievement from native Shipwright gameplay
 - [ ] Confirm the same achievement condition behaves identically under an RA-supported N64 emulator
 
@@ -127,12 +131,12 @@ This is the main technical go/no-go checkpoint. If existing achievement definiti
 
 ### Phase 0.7 - Full runtime
 
-- [ ] Continuous per-frame evaluation
-- [ ] Unlock submission
+- [x] Per-frame evaluation hook, with idle network/retry processing outside gameplay
+- [x] Runtime unlock submission/event logging wired through `rc_client` (real unlock validation pending)
 - [ ] achievement progress
 - [ ] session reconnect/recovery
 - [ ] save/load handling
-- [ ] reset handling
+- [x] Reset runtime on save entry and unload on save exit (save-state handling still pending)
 
 ### Phase 0.8 - Native UI
 
@@ -194,24 +198,27 @@ Candidates include:
 7. **Pin external dependencies.** Updating rcheevos should be an intentional, tested change.
 8. **Validate against the pinned rcheevos tag.** Upstream file layout may change after the pinned release and must not be assumed to match it.
 
-## Current bootstrap behavior
+## Current runtime behavior and validation
 
-The current `RetroAchievementsManager` is created during normal Shipwright startup through `RegisterShipInitFunc` and destroyed during process teardown.
+The manager is created through `RegisterShipInitFunc`. It owns `rc_client` and a libcurl multi transport. Requests copy their inputs before returning; responses and rcheevos callbacks are dispatched on the game thread during idle processing. Shutdown cancels pending transfers and completes their callbacks before destroying the client. HTTP redirects are not followed, TLS verification uses libcurl defaults, and response bodies are capped at 16 MiB.
 
-It currently provides:
+Gameplay frames are evaluated only with an active normal save. Authentication and request retries continue at the title/file-select screens. Unlocks, completion, disconnect/reconnect, and server errors currently go to the Shipwright log. Hardcore remains disabled.
 
-- an initialized `rc_client_t` lifecycle;
-- rcheevos INFO-level diagnostics in the Shipwright log;
-- an offline Nintendo 64 ROM hash probe for development;
-- a sparse N64 memory compatibility adapter for verified OoT state;
-- Hardcore forced off until restrictions are implemented.
+The memory adapter remains sparse. Unsupported addresses return invalid reads; this can disable achievements that use still-unmapped fields. No claim of full set support, official support, or a verified real unlock is made yet. Native account UI, secure token persistence, automatic ROM discovery, save-state handling, and complete memory coverage remain unfinished.
 
-Its integration remains deliberately limited:
+### Automated validation
 
-- unmapped runtime memory reads return invalid rather than fabricated data;
-- server requests return a client error immediately because HTTP transport is not implemented yet;
-- no credentials are requested or stored;
-- no RA network traffic occurs;
-- achievement frame processing is not enabled yet.
+The validation workflow compiles each integration source before the full Linux build and runs the HTTP tests against the same pinned rcheevos headers used by the app:
 
-This keeps the bootstrap safe while allowing build, lifecycle, ROM-hashing, and memory-layout validation before account/network integration begins.
+```bash
+python3 tests/retroachievements/run_http_tests.py --rcheevos build-cmake/_deps/shipwright_ra_rcheevos_source-src
+```
+
+The tests use only a local loopback server, synthetic request data, and no account or ROM. They cover delayed responses without blocking enqueue, POST/URL ownership, chained callbacks, HTTP status propagation, redirect refusal, response limits, shutdown, reinitialization, and the no-curl fallback. These are transport tests, not proof of in-game achievement correctness.
+
+### Next validation checkpoint
+
+1. Get the full Linux build green; inspect the desktop build matrix independently.
+2. Launch with a user-owned supported ROM and client login token; verify login and game ID in the log.
+3. Enter a normal save and inspect which achievements rcheevos marks unsupported.
+4. Compare one existing achievement against an RA-supported emulator before expanding the UI.

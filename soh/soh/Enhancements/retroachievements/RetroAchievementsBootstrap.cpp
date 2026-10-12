@@ -10,6 +10,8 @@
 namespace ShipwrightRA {
 namespace {
 
+bool developmentGameLoadStarted = false;
+
 void TryDevelopmentTokenLogin(RetroAchievementsManager& manager) {
     const char* username = std::getenv("SHIPWRIGHT_RA_USERNAME");
     const char* token = std::getenv("SHIPWRIGHT_RA_TOKEN");
@@ -35,9 +37,9 @@ void TryDevelopmentGameLoad(RetroAchievementsManager& manager) {
         return;
     }
 
-    // Phase 0.3 development probe. rc_client may enter AWAIT_LOGIN while the
-    // token request is in flight; once authentication succeeds it can continue
-    // resolving the generated ROM hash to the RetroAchievements game set.
+    // Start only with live gameplay state: rcheevos validates memory addresses
+    // during game activation and would disable scene-dependent achievements
+    // if the set were loaded while gPlayState is unavailable.
     if (!manager.BeginLoadGameFromRomPath(romPath)) {
         const std::string error = manager.GetLastGameError();
         spdlog::error("[RetroAchievements] Failed to start ROM identification{}{}", error.empty() ? "" : ": ", error);
@@ -45,7 +47,17 @@ void TryDevelopmentGameLoad(RetroAchievementsManager& manager) {
 }
 
 void ProcessRetroAchievementsFrame() {
-    RetroAchievementsManager::Instance().DoFrame();
+    auto& manager = RetroAchievementsManager::Instance();
+    manager.Idle();
+    // Title/file-select states also run this hook. Do not evaluate stale save
+    // data or invalidate scene-dependent achievements before gameplay starts.
+    if (GameInteractor::IsSaveLoaded()) {
+        if (!developmentGameLoadStarted && manager.GetAuthState() == RetroAchievementsAuthState::LoggedIn) {
+            developmentGameLoadStarted = true;
+            TryDevelopmentGameLoad(manager);
+        }
+        manager.DoFrame();
+    }
 }
 
 void InitializeRetroAchievements() {
@@ -56,8 +68,14 @@ void InitializeRetroAchievements() {
 
     GameInteractor::Instance->RegisterGameHook<GameInteractor::OnGameFrameUpdate>(ProcessRetroAchievementsFrame);
 
+    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnLoadGame>(
+        [](int32_t) { RetroAchievementsManager::Instance().ResetRuntime(); });
+    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnExitGame>([](int32_t) {
+        RetroAchievementsManager::Instance().UnloadGame();
+        developmentGameLoadStarted = false;
+    });
+
     TryDevelopmentTokenLogin(manager);
-    TryDevelopmentGameLoad(manager);
 }
 
 static RegisterShipInitFunc registerRetroAchievements(InitializeRetroAchievements);
