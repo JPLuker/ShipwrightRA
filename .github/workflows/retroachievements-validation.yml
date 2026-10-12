@@ -38,12 +38,14 @@ jobs:
             -DCMAKE_BUILD_TYPE:STRING=Release \
             -DBUILD_REMOTE_CONTROL=1
 
-      - name: Compile RetroAchievements integration
-        run: |
-          ninja -C build-cmake \
-            soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/N64MemoryAdapter.cpp.o \
-            soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsManager.cpp.o \
-            soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsBootstrap.cpp.o
+      - name: Compile RA memory adapter
+        run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/N64MemoryAdapter.cpp.o
+
+      - name: Compile RA manager
+        run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsManager.cpp.o
+
+      - name: Compile RA bootstrap
+        run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsBootstrap.cpp.o
 
       - name: Build
         run: cmake --build build-cmake --config Release -j3
