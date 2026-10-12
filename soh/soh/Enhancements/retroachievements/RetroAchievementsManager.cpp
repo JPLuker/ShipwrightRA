@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include <rc_hash.h>
 #include <spdlog/spdlog.h>
 
 namespace ShipwrightRA {
@@ -53,6 +54,22 @@ bool RetroAchievementsManager::IsInitialized() const {
 
 rc_client_t* RetroAchievementsManager::GetClient() const {
     return mClient;
+}
+
+std::optional<std::string> RetroAchievementsManager::GenerateN64RomHash(const std::string& romPath) const {
+    rc_hash_iterator_t iterator{};
+    rc_hash_initialize_iterator(&iterator, romPath.c_str(), nullptr, 0);
+
+    char hash[33] = {};
+    const int generated = rc_hash_generate(hash, RC_CONSOLE_NINTENDO_64, &iterator);
+
+    rc_hash_destroy_iterator(&iterator);
+
+    if (generated == 0) {
+        return std::nullopt;
+    }
+
+    return std::string(hash);
 }
 
 uint32_t RC_CCONV RetroAchievementsManager::ReadMemory(uint32_t address, uint8_t* buffer, uint32_t numBytes,

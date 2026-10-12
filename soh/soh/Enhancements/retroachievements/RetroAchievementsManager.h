@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string>
 
 #include <rc_client.h>
 
@@ -20,6 +22,7 @@ class RetroAchievementsManager final {
 
     [[nodiscard]] bool IsInitialized() const;
     [[nodiscard]] rc_client_t* GetClient() const;
+    [[nodiscard]] std::optional<std::string> GenerateN64RomHash(const std::string& romPath) const;
 
   private:
     RetroAchievementsManager() = default;
