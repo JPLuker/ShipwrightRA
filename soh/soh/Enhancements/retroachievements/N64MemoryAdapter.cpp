@@ -4,10 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 
-extern "C" {
 #include "functions.h"
 #include "sequence.h"
 #include "variables.h"
+// These headers provide their own C linkage and also pull in C++ headers.
+// Only the additional game-state declaration belongs in this linkage block.
+extern "C" {
 extern PlayState* gPlayState;
 }
 
