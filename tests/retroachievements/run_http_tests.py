@@ -2,11 +2,13 @@
 """Compile real transport against pinned rcheevos headers; use only loopback HTTP."""
 import argparse
 import http.server
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 import threading
 import time
+from urllib.parse import parse_qs
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -22,6 +24,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def respond(self):
         body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
         status = 200
+        if self.path == '/dorequest.php':
+            fields = parse_qs(body.decode())
+            assert fields.get('r') == ['login2']
+            user = fields['u'][0]
+            if user in ('stale', 'shutdown'):
+                time.sleep(0.3)
+            result = {'Success': False, 'Error': 'Invalid test credentials'} if user == 'invalid' else {
+                'Success': True, 'User': user, 'Token': 'synthetic',
+                'Score': 0, 'SoftcoreScore': 0, 'Messages': 0}
+            body = json.dumps(result).encode()
         if self.path == '/slow':
             time.sleep(0.3)
             body = b'slow'
@@ -46,6 +58,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--rcheevos', type=Path, required=True)
+    parser.add_argument('--spdlog', type=Path, help='Also build manager lifecycle tests using these headers')
+    parser.add_argument('--fmt-external', action='store_true', help='Link system fmt for distro spdlog headers')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     source = root / 'soh/soh/Enhancements/retroachievements'
@@ -63,6 +77,29 @@ def main():
                 if with_curl:
                     command += ['-DSHIPWRIGHT_RA_HTTP_CURL=1', '-lcurl']
                 subprocess.run(command, check=True)
+                subprocess.run([str(exe), f'http://127.0.0.1:{server.server_port}'], check=True, timeout=15)
+            if args.spdlog:
+                objects = []
+                rcheevos = args.rcheevos.resolve()
+                sources = list((rcheevos / 'src').glob('*.c'))
+                for folder in ('rcheevos', 'rapi', 'rhash'):
+                    sources += list((rcheevos / 'src' / folder).glob('*.c'))
+                for index, path in enumerate(sources):
+                    if path.name in ('rc_libretro.c', 'rc_client_external.c'):
+                        continue
+                    obj = Path(temp) / f'rc{index}.o'
+                    subprocess.run(['cc', '-DRC_DISABLE_LUA', '-DRC_CLIENT_SUPPORTS_HASH',
+                                    '-I' + str(rcheevos / 'include'), '-c', str(path), '-o', str(obj)], check=True)
+                    objects.append(str(obj))
+                exe = Path(temp) / 'manager'
+                subprocess.run(['g++', '-std=c++17', '-pthread', '-DSHIPWRIGHT_RA_HTTP_CURL=1',
+                                '-DRC_CLIENT_SUPPORTS_HASH', '-I' + str(rcheevos / 'include'),
+                                '-I' + str(args.spdlog.resolve() / 'include'), '-I' + str(source),
+                                str(source / 'RetroAchievementsManager.cpp'),
+                                str(source / 'RetroAchievementsHttp.cpp'),
+                                str(root / 'tests/retroachievements/manager_lifecycle.cpp'),
+                                *objects, *(['-DSPDLOG_FMT_EXTERNAL', '-lfmt'] if args.fmt_external else []),
+                                '-lcurl', '-o', str(exe)], check=True)
                 subprocess.run([str(exe), f'http://127.0.0.1:{server.server_port}'], check=True, timeout=15)
     finally:
         server.shutdown()

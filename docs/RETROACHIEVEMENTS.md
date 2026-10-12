@@ -214,7 +214,7 @@ The validation workflow compiles each integration source before the full Linux b
 python3 tests/retroachievements/run_http_tests.py --rcheevos build-cmake/_deps/shipwright_ra_rcheevos_source-src
 ```
 
-The tests use only a local loopback server, synthetic request data, and no account or ROM. They cover delayed responses without blocking enqueue, POST/URL ownership, chained callbacks, HTTP status propagation, redirect refusal, response limits, shutdown, reinitialization, and the no-curl fallback. These are transport tests, not proof of in-game achievement correctness.
+The tests use only a local loopback server, synthetic request data, and no account or ROM. They cover delayed responses without blocking enqueue, POST/URL ownership, chained callbacks, HTTP status propagation, redirect refusal, response limits, shutdown, reinitialization, and the no-curl fallback. The workflow also runs manager lifecycle tests against the real rcheevos runtime using a local mock login API: successful/failed login, duplicate login, logout during an outstanding request, replacement login, shutdown, and reinitialization. Pass `--spdlog /path/to/spdlog` to run these locally; distro spdlog packages may also need `--fmt-external`. These tests are not proof of in-game achievement correctness.
 
 ### Next validation checkpoint
 

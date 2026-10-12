@@ -38,8 +38,8 @@ jobs:
             -DCMAKE_BUILD_TYPE:STRING=Release \
             -DBUILD_REMOTE_CONTROL=1
 
-      - name: Test RA HTTP transport
-        run: python3 tests/retroachievements/run_http_tests.py --rcheevos build-cmake/_deps/shipwright_ra_rcheevos_source-src
+      - name: Test RA HTTP transport and manager lifecycle
+        run: python3 tests/retroachievements/run_http_tests.py --rcheevos build-cmake/_deps/shipwright_ra_rcheevos_source-src --spdlog /usr --fmt-external
 
       - name: Compile RA HTTP transport
         run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsHttp.cpp.o

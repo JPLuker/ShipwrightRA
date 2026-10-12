@@ -164,6 +164,12 @@ void RetroAchievementsManager::Logout() {
     if (mClient != nullptr) {
         rc_client_logout(mClient);
     }
+    // Finish canceled callbacks before another login can begin. Otherwise a
+    // late response from the previous account can overwrite the new session.
+    if (mHttp != nullptr) {
+        mHttp->Shutdown();
+        mHttp->Initialize();
+    }
     SetGameState(RetroAchievementsGameState::Unloaded);
     SetAuthState(RetroAchievementsAuthState::LoggedOut);
     spdlog::info("[RetroAchievements] Logged out");
