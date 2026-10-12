@@ -4,6 +4,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "soh/Enhancements/game-interactor/GameInteractor.h"
 #include "soh/ShipInit.hpp"
 
 namespace ShipwrightRA {
@@ -43,11 +44,17 @@ void TryDevelopmentGameLoad(RetroAchievementsManager& manager) {
     }
 }
 
+void ProcessRetroAchievementsFrame() {
+    RetroAchievementsManager::Instance().DoFrame();
+}
+
 void InitializeRetroAchievements() {
     auto& manager = RetroAchievementsManager::Instance();
     if (!manager.Initialize()) {
         return;
     }
+
+    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnGameFrameUpdate>(ProcessRetroAchievementsFrame);
 
     TryDevelopmentTokenLogin(manager);
     TryDevelopmentGameLoad(manager);
