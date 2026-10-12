@@ -8,6 +8,7 @@ extern "C" {
 #include "functions.h"
 #include "sequence.h"
 #include "variables.h"
+extern PlayState* gPlayState;
 }
 
 namespace ShipwrightRA {
