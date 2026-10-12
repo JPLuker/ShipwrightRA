@@ -12,7 +12,7 @@ Shipwright / OoT runtime
         v
 ShipwrightRA RetroAchievementsManager
         |
-        +--> N64-compatible memory adapter (planned)
+        +--> N64-compatible memory adapter
         |
         +--> HTTP transport (planned)
         |
@@ -42,7 +42,7 @@ The project-local CMake hook is used so the experiment does not require invasive
 - [x] Export `RC_CLIENT_SUPPORTS_HASH` to the Shipwright consumer target
 - [x] Add a ShipwrightRA-owned client lifecycle wrapper
 - [x] Add rcheevos logging through Shipwright's spdlog logger
-- [x] Add safe placeholder memory callback
+- [x] Add safe memory callback backed by the compatibility adapter
 - [x] Add safe placeholder server callback
 - [x] Disable Hardcore by default until Shipwright-specific restrictions exist
 - [x] Wire the manager into Shipwright startup through `RegisterShipInitFunc`
@@ -87,21 +87,33 @@ Determine how RetroAchievements' expected N64 addresses map to Shipwright's nati
 
 Initial probes:
 
-- [ ] health
-- [ ] rupees
-- [ ] scene ID
+- [x] health
+- [x] rupees
+- [x] scene ID
 - [ ] inventory
 - [ ] equipment
 - [ ] quest/event flags
 - [ ] dungeon state
 - [ ] actor-dependent values required by the existing achievement set
 
+Verified existing-set anchors now include:
+
+- RA `0x11A602` -> original `gSaveContext.health` at N64 `0x8011A600`
+- RA `0x1C8546` -> low byte of original `PlayState.sceneNum`
+- RA `0x1D8872` -> original `PlayState.msgCtx.textId`
+- RA `0x124E54` -> current main BGM sequence used by boss/challenge conditions
+
+See `docs/RA_MEMORY_MAP.md` for the compatibility notes and address derivations.
+
 ### Phase 0.5 - N64 memory compatibility bridge
 
-- [ ] Translate RA N64 memory reads into authoritative Shipwright state
-- [ ] Support reads spanning mapped fields/regions
-- [ ] Define byte ordering identical to the RA N64 memory model
-- [ ] Return invalid reads safely
+- [x] Translate initial RA N64 memory reads into authoritative Shipwright state
+- [x] Define byte ordering identical to the Mupen-style N64 memory model used by the existing set
+- [x] Return invalid/unmapped reads safely
+- [x] Map the original SaveContext bootstrap region through health/magic/rupees
+- [x] Map current scene, dialog ID, and main BGM sequence
+- [ ] Expand inventory/equipment/event flag regions
+- [ ] Support all memory regions used by the existing 97-achievement base set
 - [ ] Add deterministic tests for mapped addresses
 
 ### Phase 0.6 - First real achievement
@@ -191,13 +203,15 @@ It currently provides:
 - an initialized `rc_client_t` lifecycle;
 - rcheevos INFO-level diagnostics in the Shipwright log;
 - an offline Nintendo 64 ROM hash probe for development;
+- a sparse N64 memory compatibility adapter for verified OoT state;
 - Hardcore forced off until restrictions are implemented.
 
-Its integration callbacks are still deliberately limited:
+Its integration remains deliberately limited:
 
-- runtime memory reads return zero bytes / invalid address;
-- server requests return a client error immediately because HTTP transport is not implemented;
+- unmapped runtime memory reads return invalid rather than fabricated data;
+- server requests return a client error immediately because HTTP transport is not implemented yet;
 - no credentials are requested or stored;
-- no RA network traffic occurs.
+- no RA network traffic occurs;
+- achievement frame processing is not enabled yet.
 
-This keeps the bootstrap safe while allowing build, lifecycle, and ROM-hashing validation before account/network integration begins.
+This keeps the bootstrap safe while allowing build, lifecycle, ROM-hashing, and memory-layout validation before account/network integration begins.
