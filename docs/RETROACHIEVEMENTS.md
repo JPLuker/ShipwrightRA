@@ -39,11 +39,13 @@ The project-local CMake hook is used so the experiment does not require invasive
 
 - [x] Pin rcheevos v12.5.0
 - [x] Compile the `rc_client` runtime with hashing support
+- [x] Export `RC_CLIENT_SUPPORTS_HASH` to the Shipwright consumer target
 - [x] Add a ShipwrightRA-owned client lifecycle wrapper
+- [x] Add rcheevos logging through Shipwright's spdlog logger
 - [x] Add safe placeholder memory callback
 - [x] Add safe placeholder server callback
 - [x] Disable Hardcore by default until Shipwright-specific restrictions exist
-- [ ] Wire the manager into Shipwright startup/shutdown
+- [x] Wire the manager into Shipwright startup through `RegisterShipInitFunc`
 - [ ] Verify all supported desktop builds
 
 ### Phase 0.2 - Account connection
@@ -56,11 +58,28 @@ The project-local CMake hook is used so the experiment does not require invasive
 
 ### Phase 0.3 - Game identification
 
-- [ ] Locate the original user-provided OoT ROM used for asset extraction
-- [ ] Hash the ROM using rcheevos hashing support
+- [x] Add an offline N64 ROM hash probe using rcheevos' hashing implementation
+- [ ] Locate the original user-provided OoT ROM used for asset extraction automatically
 - [ ] Resolve the hash through RetroAchievements
 - [ ] Confirm the existing Ocarina of Time game/set is identified
 - [ ] Test supported OoT ROM revisions
+
+For development, `SHIPWRIGHT_RA_ROM_PATH` may be set to a local OoT ROM. On startup the fork will generate the RetroAchievements Nintendo 64 hash and write it to the normal application log. The path itself is not logged.
+
+Example on Linux/macOS:
+
+```bash
+SHIPWRIGHT_RA_ROM_PATH="/path/to/oot.z64" ./soh.elf
+```
+
+Example in PowerShell:
+
+```powershell
+$env:SHIPWRIGHT_RA_ROM_PATH="C:\path\to\oot.z64"
+.\soh.exe
+```
+
+This environment-variable hook is intentionally temporary developer scaffolding, not the planned user-facing configuration.
 
 ### Phase 0.4 - Memory research
 
@@ -161,16 +180,24 @@ Candidates include:
 5. **Do not store plaintext RA passwords.** Authentication persistence must use the token/session mechanism supported by the RA client/API.
 6. **Keep upstream rebases cheap.** Prefer project-local extension points and small lifecycle hooks over broad modifications to Shipwright core files.
 7. **Pin external dependencies.** Updating rcheevos should be an intentional, tested change.
+8. **Validate against the pinned rcheevos tag.** Upstream file layout may change after the pinned release and must not be assumed to match it.
 
 ## Current bootstrap behavior
 
-The current `RetroAchievementsManager` can create and destroy an `rc_client_t`, but it is not yet connected to Shipwright startup.
+The current `RetroAchievementsManager` is created during normal Shipwright startup through `RegisterShipInitFunc` and destroyed during process teardown.
 
-Its callbacks are deliberately inert:
+It currently provides:
 
-- memory reads return zero bytes / invalid address;
-- server requests return a client error immediately;
+- an initialized `rc_client_t` lifecycle;
+- rcheevos INFO-level diagnostics in the Shipwright log;
+- an offline Nintendo 64 ROM hash probe for development;
+- Hardcore forced off until restrictions are implemented.
+
+Its integration callbacks are still deliberately limited:
+
+- runtime memory reads return zero bytes / invalid address;
+- server requests return a client error immediately because HTTP transport is not implemented;
 - no credentials are requested or stored;
 - no RA network traffic occurs.
 
-That makes Phase 0.1 suitable for build integration testing without changing gameplay or contacting RetroAchievements.
+This keeps the bootstrap safe while allowing build, lifecycle, and ROM-hashing validation before account/network integration begins.
