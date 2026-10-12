@@ -1,6 +1,6 @@
 #include "RetroAchievementsManager.h"
 
-#include <cstring>
+#include "N64MemoryAdapter.h"
 
 #include <rc_hash.h>
 #include <spdlog/spdlog.h>
@@ -74,15 +74,8 @@ std::optional<std::string> RetroAchievementsManager::GenerateN64RomHash(const st
 
 uint32_t RC_CCONV RetroAchievementsManager::ReadMemory(uint32_t address, uint8_t* buffer, uint32_t numBytes,
                                                        rc_client_t* client) {
-    (void)address;
     (void)client;
-
-    // Phase 0.1 deliberately exposes no emulated N64 memory. Returning zero
-    // bytes tells rcheevos that the requested address is currently invalid.
-    if (buffer != nullptr && numBytes > 0) {
-        std::memset(buffer, 0, numBytes);
-    }
-    return 0;
+    return N64MemoryAdapter::Read(address, buffer, numBytes);
 }
 
 void RC_CCONV RetroAchievementsManager::ServerCall(const rc_api_request_t* request,
