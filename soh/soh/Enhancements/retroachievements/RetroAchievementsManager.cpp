@@ -48,6 +48,19 @@ int CurlFailureResponseCode(CURLcode result) {
 }
 #endif
 
+std::string ResultErrorMessage(int result, const char* errorMessage, const char* fallbackMessage) {
+    if (errorMessage != nullptr && errorMessage[0] != '\0') {
+        return errorMessage;
+    }
+
+    const char* fallback = rc_error_str(result);
+    if (fallback != nullptr && fallback[0] != '\0') {
+        return fallback;
+    }
+
+    return fallbackMessage;
+}
+
 } // namespace
 
 RetroAchievementsManager& RetroAchievementsManager::Instance() {
@@ -86,6 +99,7 @@ bool RetroAchievementsManager::Initialize() {
     rc_client_set_hardcore_enabled(mClient, 0);
 
     SetAuthState(RetroAchievementsAuthState::LoggedOut);
+    SetGameState(RetroAchievementsGameState::Unloaded);
     spdlog::info("[RetroAchievements] rcheevos client initialized (Hardcore disabled during bootstrap)");
     return true;
 }
@@ -96,6 +110,7 @@ void RetroAchievementsManager::Shutdown() {
         mClient = nullptr;
     }
 
+    SetGameState(RetroAchievementsGameState::Unloaded);
     SetAuthState(RetroAchievementsAuthState::LoggedOut);
 }
 
@@ -208,6 +223,76 @@ std::optional<RetroAchievementsUserInfo> RetroAchievementsManager::GetUserInfo()
     info.score = user->score;
     info.scoreSoftcore = user->score_softcore;
     info.unreadMessages = user->num_unread_messages;
+    return info;
+}
+
+bool RetroAchievementsManager::BeginLoadGameFromRomPath(const std::string& romPath) {
+    if (mClient == nullptr) {
+        SetGameState(RetroAchievementsGameState::Failed, "RetroAchievements client is not initialized");
+        return false;
+    }
+    if (romPath.empty()) {
+        SetGameState(RetroAchievementsGameState::Failed, "ROM path is required");
+        return false;
+    }
+
+    const auto hash = GenerateN64RomHash(romPath);
+    if (!hash.has_value()) {
+        SetGameState(RetroAchievementsGameState::Failed, "Failed to generate RetroAchievements N64 ROM hash");
+        return false;
+    }
+
+    spdlog::info("[RetroAchievements] Loading N64 game for hash {}", *hash);
+    SetGameState(RetroAchievementsGameState::Loading);
+
+    const rc_client_async_handle_t* handle = rc_client_begin_load_game(
+        mClient, hash->c_str(), &RetroAchievementsManager::LoadGameCallback, this);
+    if (handle == nullptr) {
+        if (GetGameState() == RetroAchievementsGameState::Loading) {
+            SetGameState(RetroAchievementsGameState::Failed, "Failed to start RetroAchievements game load");
+        }
+        return false;
+    }
+
+    return true;
+}
+
+void RetroAchievementsManager::UnloadGame() {
+    if (mClient != nullptr) {
+        rc_client_unload_game(mClient);
+    }
+    SetGameState(RetroAchievementsGameState::Unloaded);
+}
+
+RetroAchievementsGameState RetroAchievementsManager::GetGameState() const {
+    std::lock_guard<std::mutex> lock(mGameMutex);
+    return mGameState;
+}
+
+std::string RetroAchievementsManager::GetLastGameError() const {
+    std::lock_guard<std::mutex> lock(mGameMutex);
+    return mLastGameError;
+}
+
+std::optional<RetroAchievementsGameInfo> RetroAchievementsManager::GetGameInfo() const {
+    if (mClient == nullptr || !rc_client_is_game_loaded(mClient)) {
+        return std::nullopt;
+    }
+
+    const rc_client_game_t* game = rc_client_get_game_info(mClient);
+    if (game == nullptr) {
+        return std::nullopt;
+    }
+
+    RetroAchievementsGameInfo info;
+    info.id = game->id;
+    info.consoleId = game->console_id;
+    if (game->title != nullptr) {
+        info.title = game->title;
+    }
+    if (game->hash != nullptr) {
+        info.hash = game->hash;
+    }
     return info;
 }
 
@@ -329,14 +414,7 @@ void RC_CCONV RetroAchievementsManager::LoginCallback(int result, const char* er
     }
 
     if (result != RC_OK) {
-        std::string error;
-        if (errorMessage != nullptr && errorMessage[0] != '\0') {
-            error = errorMessage;
-        } else {
-            const char* fallback = rc_error_str(result);
-            error = fallback != nullptr ? fallback : "Unknown RetroAchievements authentication error";
-        }
-
+        const std::string error = ResultErrorMessage(result, errorMessage, "Unknown RetroAchievements authentication error");
         manager->SetAuthState(RetroAchievementsAuthState::Failed, error);
         spdlog::warn("[RetroAchievements] Login failed: {}", error);
         return;
@@ -352,6 +430,33 @@ void RC_CCONV RetroAchievementsManager::LoginCallback(int result, const char* er
     }
 }
 
+void RC_CCONV RetroAchievementsManager::LoadGameCallback(int result, const char* errorMessage, rc_client_t* client,
+                                                         void* userdata) {
+    auto* manager = static_cast<RetroAchievementsManager*>(userdata);
+    if (manager == nullptr) {
+        return;
+    }
+
+    if (result != RC_OK) {
+        const std::string error = ResultErrorMessage(result, errorMessage, "Unknown RetroAchievements game-load error");
+        manager->SetGameState(RetroAchievementsGameState::Failed, error);
+        spdlog::warn("[RetroAchievements] Game identification/load failed: {}", error);
+        return;
+    }
+
+    const rc_client_game_t* game = client != nullptr ? rc_client_get_game_info(client) : nullptr;
+    if (game == nullptr || game->id == 0) {
+        manager->SetGameState(RetroAchievementsGameState::Failed,
+                              "RetroAchievements returned no identified game for the supplied ROM hash");
+        spdlog::warn("[RetroAchievements] Game load completed without an identified game");
+        return;
+    }
+
+    manager->SetGameState(RetroAchievementsGameState::Loaded);
+    spdlog::info("[RetroAchievements] Identified game {} ({}) [hash {}]", game->title != nullptr ? game->title : "Unknown",
+                 game->id, game->hash != nullptr ? game->hash : "unknown");
+}
+
 void RC_CCONV RetroAchievementsManager::LogMessage(const char* message, const rc_client_t* client) {
     (void)client;
 
@@ -364,6 +469,12 @@ void RetroAchievementsManager::SetAuthState(RetroAchievementsAuthState state, st
     std::lock_guard<std::mutex> lock(mAuthMutex);
     mAuthState = state;
     mLastAuthError = std::move(error);
+}
+
+void RetroAchievementsManager::SetGameState(RetroAchievementsGameState state, std::string error) {
+    std::lock_guard<std::mutex> lock(mGameMutex);
+    mGameState = state;
+    mLastGameError = std::move(error);
 }
 
 } // namespace ShipwrightRA
