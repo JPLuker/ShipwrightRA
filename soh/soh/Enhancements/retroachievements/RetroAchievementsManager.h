@@ -28,6 +28,7 @@ class RetroAchievementsManager final {
     static uint32_t RC_CCONV ReadMemory(uint32_t address, uint8_t* buffer, uint32_t numBytes, rc_client_t* client);
     static void RC_CCONV ServerCall(const rc_api_request_t* request, rc_client_server_callback_t callback,
                                     void* callbackData, rc_client_t* client);
+    static void RC_CCONV LogMessage(const char* message, const rc_client_t* client);
 
     rc_client_t* mClient = nullptr;
 };

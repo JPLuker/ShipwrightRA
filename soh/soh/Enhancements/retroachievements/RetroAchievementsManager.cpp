@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include <spdlog/spdlog.h>
+
 namespace ShipwrightRA {
 
 RetroAchievementsManager& RetroAchievementsManager::Instance() {
@@ -20,13 +22,19 @@ bool RetroAchievementsManager::Initialize() {
 
     mClient = rc_client_create(&RetroAchievementsManager::ReadMemory, &RetroAchievementsManager::ServerCall);
     if (mClient == nullptr) {
+        spdlog::error("[RetroAchievements] Failed to create rcheevos client");
         return false;
     }
+
+    rc_client_set_userdata(mClient, this);
+    rc_client_enable_logging(mClient, RC_CLIENT_LOG_LEVEL_INFO, &RetroAchievementsManager::LogMessage);
 
     // Hardcore defaults to enabled in rc_client. Keep the experimental client
     // permissive until ShipwrightRA can enforce the full Hardcore restriction
     // contract (cheats, save states, speed controls, etc.).
     rc_client_set_hardcore_enabled(mClient, 0);
+
+    spdlog::info("[RetroAchievements] rcheevos client initialized (Hardcore disabled during bootstrap)");
     return true;
 }
 
@@ -69,6 +77,8 @@ void RC_CCONV RetroAchievementsManager::ServerCall(const rc_api_request_t* reque
     // Networking is intentionally not implemented in the bootstrap phase.
     // Always complete the request instead of leaving rc_client waiting for an
     // asynchronous callback that will never arrive.
+    spdlog::warn("[RetroAchievements] Server request rejected because HTTP transport is not configured yet");
+
     if (callback != nullptr) {
         const rc_api_server_response_t response = {
             nullptr,
@@ -76,6 +86,14 @@ void RC_CCONV RetroAchievementsManager::ServerCall(const rc_api_request_t* reque
             RC_API_SERVER_RESPONSE_CLIENT_ERROR,
         };
         callback(&response, callbackData);
+    }
+}
+
+void RC_CCONV RetroAchievementsManager::LogMessage(const char* message, const rc_client_t* client) {
+    (void)client;
+
+    if (message != nullptr) {
+        spdlog::info("[RetroAchievements] {}", message);
     }
 }
 

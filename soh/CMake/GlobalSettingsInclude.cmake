@@ -40,9 +40,13 @@ add_library(shipwright_ra_rcheevos STATIC ${SHIPWRIGHT_RA_RCHEEVOS_SOURCES})
 target_include_directories(shipwright_ra_rcheevos PUBLIC
     "${shipwright_ra_rcheevos_source_SOURCE_DIR}/include"
 )
-target_compile_definitions(shipwright_ra_rcheevos PRIVATE
-    RC_DISABLE_LUA
-    RC_CLIENT_SUPPORTS_HASH
+target_compile_definitions(shipwright_ra_rcheevos
+    PRIVATE
+        RC_DISABLE_LUA
+    PUBLIC
+        # Consumers need this definition too so rc_client.h exposes the
+        # identify-and-load hashing API used by the upcoming ROM detection phase.
+        RC_CLIENT_SUPPORTS_HASH
 )
 set_target_properties(shipwright_ra_rcheevos PROPERTIES
     POSITION_INDEPENDENT_CODE ON
