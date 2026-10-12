@@ -53,6 +53,21 @@ set_target_properties(shipwright_ra_rcheevos PROPERTIES
 )
 
 # GlobalSettingsInclude.cmake is evaluated before the soh target is created.
-# link_libraries applies the dependency to targets created below this point
+# link_libraries applies dependencies to targets created below this point
 # without requiring changes to the upstream soh/CMakeLists.txt.
 link_libraries(shipwright_ra_rcheevos)
+
+# RetroAchievements API traffic requires HTTPS. Keep the transport dependency
+# limited to desktop builds; unsupported console builds retain the explicit
+# client-error fallback in RetroAchievementsManager::ServerCall.
+if(NOT CMAKE_SYSTEM_NAME MATCHES "NintendoSwitch|CafeOS")
+    # The top-level Windows build owns vcpkg bootstrap. Reuse that helper when
+    # available so CURL::libcurl is provisioned without touching upstream CMake.
+    if(WIN32 AND COMMAND vcpkg_install_packages)
+        vcpkg_install_packages(curl)
+    endif()
+
+    find_package(CURL REQUIRED)
+    link_libraries(CURL::libcurl)
+    add_compile_definitions(SHIPWRIGHT_RA_HTTP_CURL=1)
+endif()
