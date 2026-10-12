@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include <rc_hash.h>
 #include <spdlog/spdlog.h>
@@ -84,17 +85,18 @@ bool RetroAchievementsManager::Initialize() {
     // contract (cheats, save states, speed controls, etc.).
     rc_client_set_hardcore_enabled(mClient, 0);
 
+    SetAuthState(RetroAchievementsAuthState::LoggedOut);
     spdlog::info("[RetroAchievements] rcheevos client initialized (Hardcore disabled during bootstrap)");
     return true;
 }
 
 void RetroAchievementsManager::Shutdown() {
-    if (mClient == nullptr) {
-        return;
+    if (mClient != nullptr) {
+        rc_client_destroy(mClient);
+        mClient = nullptr;
     }
 
-    rc_client_destroy(mClient);
-    mClient = nullptr;
+    SetAuthState(RetroAchievementsAuthState::LoggedOut);
 }
 
 bool RetroAchievementsManager::IsInitialized() const {
@@ -119,6 +121,94 @@ std::optional<std::string> RetroAchievementsManager::GenerateN64RomHash(const st
     }
 
     return std::string(hash);
+}
+
+bool RetroAchievementsManager::BeginLoginWithPassword(const std::string& username, const std::string& password) {
+    if (mClient == nullptr) {
+        SetAuthState(RetroAchievementsAuthState::Failed, "RetroAchievements client is not initialized");
+        return false;
+    }
+    if (username.empty() || password.empty()) {
+        SetAuthState(RetroAchievementsAuthState::Failed, "Username and password are required");
+        return false;
+    }
+
+    SetAuthState(RetroAchievementsAuthState::Authenticating);
+    const rc_client_async_handle_t* handle =
+        rc_client_begin_login_with_password(mClient, username.c_str(), password.c_str(),
+                                            &RetroAchievementsManager::LoginCallback, this);
+    if (handle == nullptr) {
+        if (GetAuthState() == RetroAchievementsAuthState::Authenticating) {
+            SetAuthState(RetroAchievementsAuthState::Failed, "Failed to start RetroAchievements login");
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool RetroAchievementsManager::BeginLoginWithToken(const std::string& username, const std::string& token) {
+    if (mClient == nullptr) {
+        SetAuthState(RetroAchievementsAuthState::Failed, "RetroAchievements client is not initialized");
+        return false;
+    }
+    if (username.empty() || token.empty()) {
+        SetAuthState(RetroAchievementsAuthState::Failed, "Username and token are required");
+        return false;
+    }
+
+    SetAuthState(RetroAchievementsAuthState::Authenticating);
+    const rc_client_async_handle_t* handle = rc_client_begin_login_with_token(
+        mClient, username.c_str(), token.c_str(), &RetroAchievementsManager::LoginCallback, this);
+    if (handle == nullptr) {
+        if (GetAuthState() == RetroAchievementsAuthState::Authenticating) {
+            SetAuthState(RetroAchievementsAuthState::Failed, "Failed to start RetroAchievements token login");
+        }
+        return false;
+    }
+
+    return true;
+}
+
+void RetroAchievementsManager::Logout() {
+    if (mClient != nullptr) {
+        rc_client_logout(mClient);
+    }
+    SetAuthState(RetroAchievementsAuthState::LoggedOut);
+    spdlog::info("[RetroAchievements] Logged out");
+}
+
+RetroAchievementsAuthState RetroAchievementsManager::GetAuthState() const {
+    std::lock_guard<std::mutex> lock(mAuthMutex);
+    return mAuthState;
+}
+
+std::string RetroAchievementsManager::GetLastAuthError() const {
+    std::lock_guard<std::mutex> lock(mAuthMutex);
+    return mLastAuthError;
+}
+
+std::optional<RetroAchievementsUserInfo> RetroAchievementsManager::GetUserInfo() const {
+    if (mClient == nullptr) {
+        return std::nullopt;
+    }
+
+    const rc_client_user_t* user = rc_client_get_user_info(mClient);
+    if (user == nullptr) {
+        return std::nullopt;
+    }
+
+    RetroAchievementsUserInfo info;
+    if (user->username != nullptr) {
+        info.username = user->username;
+    }
+    if (user->display_name != nullptr) {
+        info.displayName = user->display_name;
+    }
+    info.score = user->score;
+    info.scoreSoftcore = user->score_softcore;
+    info.unreadMessages = user->num_unread_messages;
+    return info;
 }
 
 uint32_t RC_CCONV RetroAchievementsManager::ReadMemory(uint32_t address, uint8_t* buffer, uint32_t numBytes,
@@ -231,12 +321,49 @@ void RC_CCONV RetroAchievementsManager::ServerCall(const rc_api_request_t* reque
 #endif
 }
 
+void RC_CCONV RetroAchievementsManager::LoginCallback(int result, const char* errorMessage, rc_client_t* client,
+                                                      void* userdata) {
+    auto* manager = static_cast<RetroAchievementsManager*>(userdata);
+    if (manager == nullptr) {
+        return;
+    }
+
+    if (result != RC_OK) {
+        std::string error;
+        if (errorMessage != nullptr && errorMessage[0] != '\0') {
+            error = errorMessage;
+        } else {
+            const char* fallback = rc_error_str(result);
+            error = fallback != nullptr ? fallback : "Unknown RetroAchievements authentication error";
+        }
+
+        manager->SetAuthState(RetroAchievementsAuthState::Failed, error);
+        spdlog::warn("[RetroAchievements] Login failed: {}", error);
+        return;
+    }
+
+    manager->SetAuthState(RetroAchievementsAuthState::LoggedIn);
+
+    const rc_client_user_t* user = client != nullptr ? rc_client_get_user_info(client) : nullptr;
+    if (user != nullptr && user->username != nullptr) {
+        spdlog::info("[RetroAchievements] Logged in as {}", user->username);
+    } else {
+        spdlog::info("[RetroAchievements] Login succeeded");
+    }
+}
+
 void RC_CCONV RetroAchievementsManager::LogMessage(const char* message, const rc_client_t* client) {
     (void)client;
 
     if (message != nullptr) {
         spdlog::info("[RetroAchievements] {}", message);
     }
+}
+
+void RetroAchievementsManager::SetAuthState(RetroAchievementsAuthState state, std::string error) {
+    std::lock_guard<std::mutex> lock(mAuthMutex);
+    mAuthState = state;
+    mLastAuthError = std::move(error);
 }
 
 } // namespace ShipwrightRA
