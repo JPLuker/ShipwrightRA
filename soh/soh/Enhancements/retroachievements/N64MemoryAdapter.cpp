@@ -5,6 +5,8 @@
 #include <cstdint>
 
 extern "C" {
+#include "functions.h"
+#include "sequence.h"
 #include "variables.h"
 }
 
@@ -12,6 +14,10 @@ namespace ShipwrightRA {
 namespace {
 
 using SavePrefix = std::array<uint8_t, N64MemoryAdapter::kSaveContextBootstrapSize>;
+
+constexpr uint32_t kPlayStateSceneNumAddress = 0x001C8544;
+constexpr uint32_t kMessageTextIdAddress = 0x001D8870;
+constexpr uint32_t kMainBgmSequenceAddress = 0x00124E56;
 
 void WriteBE16(SavePrefix& output, size_t offset, uint16_t value) {
     output[offset] = static_cast<uint8_t>((value >> 8) & 0xFF);
@@ -23,6 +29,18 @@ void WriteBE32(SavePrefix& output, size_t offset, uint32_t value) {
     output[offset + 1] = static_cast<uint8_t>((value >> 16) & 0xFF);
     output[offset + 2] = static_cast<uint8_t>((value >> 8) & 0xFF);
     output[offset + 3] = static_cast<uint8_t>(value & 0xFF);
+}
+
+bool ReadBE16Byte(uint32_t address, uint32_t fieldAddress, uint16_t value, uint8_t& output) {
+    if (address == fieldAddress) {
+        output = static_cast<uint8_t>((value >> 8) & 0xFF);
+        return true;
+    }
+    if (address == fieldAddress + 1) {
+        output = static_cast<uint8_t>(value & 0xFF);
+        return true;
+    }
+    return false;
 }
 
 SavePrefix BuildSaveContextPrefix() {
@@ -67,6 +85,33 @@ SavePrefix BuildSaveContextPrefix() {
     return output;
 }
 
+bool ReadCanonicalByte(uint32_t n64Address, const SavePrefix& saveContext, uint8_t& output) {
+    if (n64Address >= N64MemoryAdapter::kSaveContextBase &&
+        n64Address < N64MemoryAdapter::kSaveContextBase + N64MemoryAdapter::kSaveContextBootstrapSize) {
+        output = saveContext[n64Address - N64MemoryAdapter::kSaveContextBase];
+        return true;
+    }
+
+    if (gPlayState != nullptr) {
+        if (ReadBE16Byte(n64Address, kPlayStateSceneNumAddress, static_cast<uint16_t>(gPlayState->sceneNum), output)) {
+            return true;
+        }
+        if (ReadBE16Byte(n64Address, kMessageTextIdAddress, gPlayState->msgCtx.textId, output)) {
+            return true;
+        }
+    }
+
+    // The base OoT achievement set uses the original main-BGM sequence value
+    // around boss encounters. Community RA scripts identify raw address
+    // 0x124E54 as musicId; after Mupen word swizzling the canonical u16 lives
+    // at 0x124E56.
+    if (ReadBE16Byte(n64Address, kMainBgmSequenceAddress, func_800FA0B4(SEQ_PLAYER_BGM_MAIN), output)) {
+        return true;
+    }
+
+    return false;
+}
+
 } // namespace
 
 uint32_t N64MemoryAdapter::Read(uint32_t address, uint8_t* buffer, uint32_t numBytes) {
@@ -89,12 +134,9 @@ uint32_t N64MemoryAdapter::Read(uint32_t address, uint8_t* buffer, uint32_t numB
         // Convert the requested RA byte back to its canonical N64 byte address.
         const uint32_t n64Address = raAddress ^ 0x3U;
 
-        if (n64Address < kSaveContextBase ||
-            n64Address >= kSaveContextBase + kSaveContextBootstrapSize) {
+        if (!ReadCanonicalByte(n64Address, saveContext, buffer[bytesRead])) {
             break;
         }
-
-        buffer[bytesRead] = saveContext[n64Address - kSaveContextBase];
     }
 
     return bytesRead;
