@@ -16,12 +16,26 @@ enum class RetroAchievementsAuthState {
     Failed,
 };
 
+enum class RetroAchievementsGameState {
+    Unloaded,
+    Loading,
+    Loaded,
+    Failed,
+};
+
 struct RetroAchievementsUserInfo {
     std::string username;
     std::string displayName;
     uint32_t score = 0;
     uint32_t scoreSoftcore = 0;
     uint32_t unreadMessages = 0;
+};
+
+struct RetroAchievementsGameInfo {
+    uint32_t id = 0;
+    uint32_t consoleId = 0;
+    std::string title;
+    std::string hash;
 };
 
 class RetroAchievementsManager final {
@@ -50,6 +64,15 @@ class RetroAchievementsManager final {
     [[nodiscard]] std::string GetLastAuthError() const;
     [[nodiscard]] std::optional<RetroAchievementsUserInfo> GetUserInfo() const;
 
+    // Phase 0.3 game-identification probe. Hashes the supplied N64 ROM locally,
+    // then asks rc_client to resolve and load the matching RetroAchievements game.
+    bool BeginLoadGameFromRomPath(const std::string& romPath);
+    void UnloadGame();
+
+    [[nodiscard]] RetroAchievementsGameState GetGameState() const;
+    [[nodiscard]] std::string GetLastGameError() const;
+    [[nodiscard]] std::optional<RetroAchievementsGameInfo> GetGameInfo() const;
+
   private:
     RetroAchievementsManager() = default;
     ~RetroAchievementsManager();
@@ -58,14 +81,21 @@ class RetroAchievementsManager final {
     static void RC_CCONV ServerCall(const rc_api_request_t* request, rc_client_server_callback_t callback,
                                     void* callbackData, rc_client_t* client);
     static void RC_CCONV LoginCallback(int result, const char* errorMessage, rc_client_t* client, void* userdata);
+    static void RC_CCONV LoadGameCallback(int result, const char* errorMessage, rc_client_t* client, void* userdata);
     static void RC_CCONV LogMessage(const char* message, const rc_client_t* client);
 
     void SetAuthState(RetroAchievementsAuthState state, std::string error = {});
+    void SetGameState(RetroAchievementsGameState state, std::string error = {});
 
     rc_client_t* mClient = nullptr;
+
     mutable std::mutex mAuthMutex;
     RetroAchievementsAuthState mAuthState = RetroAchievementsAuthState::LoggedOut;
     std::string mLastAuthError;
+
+    mutable std::mutex mGameMutex;
+    RetroAchievementsGameState mGameState = RetroAchievementsGameState::Unloaded;
+    std::string mLastGameError;
 };
 
 } // namespace ShipwrightRA
