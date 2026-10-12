@@ -73,6 +73,10 @@ class RetroAchievementsManager final {
     [[nodiscard]] std::string GetLastGameError() const;
     [[nodiscard]] std::optional<RetroAchievementsGameInfo> GetGameInfo() const;
 
+    // Processes one logical Shipwright game update through the rcheevos runtime.
+    // Does nothing until a RetroAchievements game is fully loaded.
+    void DoFrame();
+
   private:
     RetroAchievementsManager() = default;
     ~RetroAchievementsManager();
@@ -82,6 +86,7 @@ class RetroAchievementsManager final {
                                     void* callbackData, rc_client_t* client);
     static void RC_CCONV LoginCallback(int result, const char* errorMessage, rc_client_t* client, void* userdata);
     static void RC_CCONV LoadGameCallback(int result, const char* errorMessage, rc_client_t* client, void* userdata);
+    static void RC_CCONV EventHandler(const rc_client_event_t* event, rc_client_t* client);
     static void RC_CCONV LogMessage(const char* message, const rc_client_t* client);
 
     void SetAuthState(RetroAchievementsAuthState state, std::string error = {});
