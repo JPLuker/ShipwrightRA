@@ -28,6 +28,21 @@ void TryDevelopmentTokenLogin(RetroAchievementsManager& manager) {
     manager.BeginLoginWithToken(username, token);
 }
 
+void TryDevelopmentGameLoad(RetroAchievementsManager& manager) {
+    const char* romPath = std::getenv("SHIPWRIGHT_RA_ROM_PATH");
+    if (romPath == nullptr || romPath[0] == '\0') {
+        return;
+    }
+
+    // Phase 0.3 development probe. rc_client may enter AWAIT_LOGIN while the
+    // token request is in flight; once authentication succeeds it can continue
+    // resolving the generated ROM hash to the RetroAchievements game set.
+    if (!manager.BeginLoadGameFromRomPath(romPath)) {
+        const std::string error = manager.GetLastGameError();
+        spdlog::error("[RetroAchievements] Failed to start ROM identification{}{}", error.empty() ? "" : ": ", error);
+    }
+}
+
 void InitializeRetroAchievements() {
     auto& manager = RetroAchievementsManager::Instance();
     if (!manager.Initialize()) {
@@ -35,22 +50,7 @@ void InitializeRetroAchievements() {
     }
 
     TryDevelopmentTokenLogin(manager);
-
-    // Experimental Phase 0.3 test hook. Supplying a ROM here lets us validate
-    // RetroAchievements' N64 hashing behavior before user-facing ROM detection
-    // is implemented. This is intentionally not a normal configuration path.
-    const char* romPath = std::getenv("SHIPWRIGHT_RA_ROM_PATH");
-    if (romPath == nullptr || romPath[0] == '\0') {
-        return;
-    }
-
-    const auto hash = manager.GenerateN64RomHash(romPath);
-    if (!hash.has_value()) {
-        spdlog::error("[RetroAchievements] Failed to generate N64 hash for SHIPWRIGHT_RA_ROM_PATH");
-        return;
-    }
-
-    spdlog::info("[RetroAchievements] N64 ROM hash probe: {}", *hash);
+    TryDevelopmentGameLoad(manager);
 }
 
 static RegisterShipInitFunc registerRetroAchievements(InitializeRetroAchievements);
