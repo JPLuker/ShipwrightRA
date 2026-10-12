@@ -92,6 +92,7 @@ bool RetroAchievementsManager::Initialize() {
 
     rc_client_set_userdata(mClient, this);
     rc_client_enable_logging(mClient, RC_CLIENT_LOG_LEVEL_INFO, &RetroAchievementsManager::LogMessage);
+    rc_client_set_event_handler(mClient, &RetroAchievementsManager::EventHandler);
 
     // Hardcore defaults to enabled in rc_client. Keep the experimental client
     // permissive until ShipwrightRA can enforce the full Hardcore restriction
@@ -296,6 +297,14 @@ std::optional<RetroAchievementsGameInfo> RetroAchievementsManager::GetGameInfo()
     return info;
 }
 
+void RetroAchievementsManager::DoFrame() {
+    if (mClient == nullptr || !rc_client_is_game_loaded(mClient)) {
+        return;
+    }
+
+    rc_client_do_frame(mClient);
+}
+
 uint32_t RC_CCONV RetroAchievementsManager::ReadMemory(uint32_t address, uint8_t* buffer, uint32_t numBytes,
                                                        rc_client_t* client) {
     (void)client;
@@ -455,6 +464,53 @@ void RC_CCONV RetroAchievementsManager::LoadGameCallback(int result, const char*
     manager->SetGameState(RetroAchievementsGameState::Loaded);
     spdlog::info("[RetroAchievements] Identified game {} ({}) [hash {}]", game->title != nullptr ? game->title : "Unknown",
                  game->id, game->hash != nullptr ? game->hash : "unknown");
+}
+
+void RC_CCONV RetroAchievementsManager::EventHandler(const rc_client_event_t* event, rc_client_t* client) {
+    (void)client;
+
+    if (event == nullptr) {
+        return;
+    }
+
+    switch (event->type) {
+        case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED:
+            if (event->achievement != nullptr) {
+                spdlog::info("[RetroAchievements] Achievement unlocked: {} ({}) - {} points",
+                             event->achievement->title != nullptr ? event->achievement->title : "Unknown",
+                             event->achievement->id, event->achievement->points);
+            } else {
+                spdlog::info("[RetroAchievements] Achievement unlocked");
+            }
+            break;
+        case RC_CLIENT_EVENT_GAME_COMPLETED:
+            spdlog::info("[RetroAchievements] Game completed");
+            break;
+        case RC_CLIENT_EVENT_SUBSET_COMPLETED:
+            if (event->subset != nullptr) {
+                spdlog::info("[RetroAchievements] Achievement subset completed: {}",
+                             event->subset->title != nullptr ? event->subset->title : "Unknown");
+            }
+            break;
+        case RC_CLIENT_EVENT_SERVER_ERROR:
+            if (event->server_error != nullptr) {
+                spdlog::warn("[RetroAchievements] Server error in {}: {}",
+                             event->server_error->api != nullptr ? event->server_error->api : "unknown API",
+                             event->server_error->error_message != nullptr ? event->server_error->error_message
+                                                                          : "unknown error");
+            } else {
+                spdlog::warn("[RetroAchievements] Server error");
+            }
+            break;
+        case RC_CLIENT_EVENT_DISCONNECTED:
+            spdlog::warn("[RetroAchievements] Disconnected; unlock submissions are pending");
+            break;
+        case RC_CLIENT_EVENT_RECONNECTED:
+            spdlog::info("[RetroAchievements] Reconnected; pending submissions completed");
+            break;
+        default:
+            break;
+    }
 }
 
 void RC_CCONV RetroAchievementsManager::LogMessage(const char* message, const rc_client_t* client) {
