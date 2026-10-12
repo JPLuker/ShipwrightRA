@@ -16,7 +16,11 @@ class N64MemoryAdapter final {
     // OoT NTSC-U 1.0 gSaveContext physical RDRAM offset. The original virtual
     // address is 0x8011A5D0.
     static constexpr uint32_t kSaveContextBase = 0x0011A5D0;
-    static constexpr uint32_t kSaveContextBootstrapSize = 0x40;
+
+    // Contiguous original SaveContext prefix through Inventory. This is
+    // serialized explicitly because native SoH structures contain extensions
+    // that change their host layout.
+    static constexpr uint32_t kSaveContextCoreSize = 0x00D4;
 
     // Fills buffer using the raw host-native N64 RDRAM layout expected by
     // existing RA N64 sets. Returns the number of bytes successfully read.

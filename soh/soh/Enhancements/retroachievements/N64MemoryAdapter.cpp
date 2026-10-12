@@ -13,22 +13,65 @@ extern "C" {
 namespace ShipwrightRA {
 namespace {
 
-using SavePrefix = std::array<uint8_t, N64MemoryAdapter::kSaveContextBootstrapSize>;
+using SaveCore = std::array<uint8_t, N64MemoryAdapter::kSaveContextCoreSize>;
 
 constexpr uint32_t kPlayStateSceneNumAddress = 0x001C8544;
 constexpr uint32_t kMessageTextIdAddress = 0x001D8870;
 constexpr uint32_t kMainBgmSequenceAddress = 0x00124E56;
 
-void WriteBE16(SavePrefix& output, size_t offset, uint16_t value) {
+constexpr uint32_t kEventChkInfOffset = 0x0ED4;
+constexpr uint32_t kItemGetInfOffset = 0x0EF0;
+constexpr uint32_t kInfTableOffset = 0x0EF8;
+
+void WriteBE16(SaveCore& output, size_t offset, uint16_t value) {
     output[offset] = static_cast<uint8_t>((value >> 8) & 0xFF);
     output[offset + 1] = static_cast<uint8_t>(value & 0xFF);
 }
 
-void WriteBE32(SavePrefix& output, size_t offset, uint32_t value) {
+void WriteBE32(SaveCore& output, size_t offset, uint32_t value) {
     output[offset] = static_cast<uint8_t>((value >> 24) & 0xFF);
     output[offset + 1] = static_cast<uint8_t>((value >> 16) & 0xFF);
     output[offset + 2] = static_cast<uint8_t>((value >> 8) & 0xFF);
     output[offset + 3] = static_cast<uint8_t>(value & 0xFF);
+}
+
+void SerializeItemEquips(SaveCore& output, size_t offset, const ItemEquips& equips) {
+    // Original OoT stores only B + C-left/down/right (4 items) and the three
+    // C-button slots. SoH extends both arrays for D-pad equips; those extra
+    // entries must not shift the canonical N64 structure.
+    for (size_t i = 0; i < 4; ++i) {
+        output[offset + i] = equips.buttonItems[i];
+    }
+    for (size_t i = 0; i < 3; ++i) {
+        output[offset + 0x04 + i] = equips.cButtonSlots[i];
+    }
+    // Original offset 0x07 is alignment padding.
+    WriteBE16(output, offset + 0x08, equips.equipment);
+}
+
+void SerializeInventory(SaveCore& output, size_t offset, const Inventory& inventory) {
+    for (size_t i = 0; i < 24; ++i) {
+        output[offset + i] = inventory.items[i];
+    }
+    for (size_t i = 0; i < 16; ++i) {
+        output[offset + 0x18 + i] = static_cast<uint8_t>(inventory.ammo[i]);
+    }
+
+    WriteBE16(output, offset + 0x28, inventory.equipment);
+    // Original offsets 0x2A-0x2B are alignment padding.
+    WriteBE32(output, offset + 0x2C, inventory.upgrades);
+    WriteBE32(output, offset + 0x30, inventory.questItems);
+
+    for (size_t i = 0; i < 20; ++i) {
+        output[offset + 0x34 + i] = inventory.dungeonItems[i];
+    }
+    for (size_t i = 0; i < 19; ++i) {
+        output[offset + 0x48 + i] = static_cast<uint8_t>(inventory.dungeonKeys[i]);
+    }
+
+    output[offset + 0x5B] = static_cast<uint8_t>(inventory.defenseHearts);
+    WriteBE16(output, offset + 0x5C, static_cast<uint16_t>(inventory.gsTokens));
+    // 0x5E-0x5F are alignment bytes before sceneFlags.
 }
 
 bool ReadBE16Byte(uint32_t address, uint32_t fieldAddress, uint16_t value, uint8_t& output) {
@@ -43,17 +86,30 @@ bool ReadBE16Byte(uint32_t address, uint32_t fieldAddress, uint16_t value, uint8
     return false;
 }
 
-SavePrefix BuildSaveContextPrefix() {
-    SavePrefix output{};
+template <size_t N>
+bool ReadBE16ArrayByte(uint32_t address, uint32_t fieldAddress, const uint16_t (&values)[N], uint8_t& output) {
+    const uint32_t size = static_cast<uint32_t>(N * sizeof(uint16_t));
+    if (address < fieldAddress || address >= fieldAddress + size) {
+        return false;
+    }
 
-    // Serialize by the original NTSC-U 1.0 SaveContext offsets rather than
-    // memcpy'ing the native SoH structure. SoH has expanded several nested
-    // structures, so its host layout intentionally diverges from N64 RAM.
+    const uint32_t relative = address - fieldAddress;
+    const uint16_t value = values[relative / 2];
+    output = (relative & 1U) == 0 ? static_cast<uint8_t>((value >> 8) & 0xFF)
+                                 : static_cast<uint8_t>(value & 0xFF);
+    return true;
+}
+
+SaveCore BuildSaveContextCore() {
+    SaveCore output{};
+
+    // Serialize by original NTSC-U 1.0 SaveContext offsets rather than
+    // memcpy'ing the native SoH structure. SoH has expanded nested structures,
+    // so its host layout intentionally diverges from N64 RAM.
     WriteBE32(output, 0x00, static_cast<uint32_t>(gSaveContext.entranceIndex));
     WriteBE32(output, 0x04, static_cast<uint32_t>(gSaveContext.linkAge));
     WriteBE32(output, 0x08, static_cast<uint32_t>(gSaveContext.cutsceneIndex));
     WriteBE16(output, 0x0C, gSaveContext.dayTime);
-    // 0x0E-0x0F are alignment bytes in the original structure.
     WriteBE32(output, 0x10, static_cast<uint32_t>(gSaveContext.nightFlag));
     WriteBE32(output, 0x14, static_cast<uint32_t>(gSaveContext.totalDays));
     WriteBE32(output, 0x18, static_cast<uint32_t>(gSaveContext.bgsDayCount));
@@ -82,14 +138,33 @@ SavePrefix BuildSaveContextPrefix() {
     output[0x3E] = gSaveContext.bgsFlag;
     output[0x3F] = gSaveContext.ocarinaGameRoundNum;
 
+    SerializeItemEquips(output, 0x40, gSaveContext.childEquips);
+    SerializeItemEquips(output, 0x4A, gSaveContext.adultEquips);
+    WriteBE32(output, 0x54, gSaveContext.unk_54);
+    for (size_t i = 0; i < 0x0E; ++i) {
+        output[0x58 + i] = static_cast<uint8_t>(gSaveContext.unk_58[i]);
+    }
+    WriteBE16(output, 0x66, static_cast<uint16_t>(gSaveContext.savedSceneNum));
+    SerializeItemEquips(output, 0x68, gSaveContext.equips);
+    SerializeInventory(output, 0x74, gSaveContext.inventory);
+
     return output;
 }
 
-bool ReadCanonicalByte(uint32_t n64Address, const SavePrefix& saveContext, uint8_t& output) {
+bool ReadCanonicalByte(uint32_t n64Address, const SaveCore& saveContext, uint8_t& output) {
     if (n64Address >= N64MemoryAdapter::kSaveContextBase &&
-        n64Address < N64MemoryAdapter::kSaveContextBase + N64MemoryAdapter::kSaveContextBootstrapSize) {
+        n64Address < N64MemoryAdapter::kSaveContextBase + N64MemoryAdapter::kSaveContextCoreSize) {
         output = saveContext[n64Address - N64MemoryAdapter::kSaveContextBase];
         return true;
+    }
+
+    const uint32_t saveOffset = n64Address - N64MemoryAdapter::kSaveContextBase;
+    if (n64Address >= N64MemoryAdapter::kSaveContextBase) {
+        if (ReadBE16ArrayByte(saveOffset, kEventChkInfOffset, gSaveContext.eventChkInf, output) ||
+            ReadBE16ArrayByte(saveOffset, kItemGetInfOffset, gSaveContext.itemGetInf, output) ||
+            ReadBE16ArrayByte(saveOffset, kInfTableOffset, gSaveContext.infTable, output)) {
+            return true;
+        }
     }
 
     if (gPlayState != nullptr) {
@@ -119,7 +194,7 @@ uint32_t N64MemoryAdapter::Read(uint32_t address, uint8_t* buffer, uint32_t numB
         return 0;
     }
 
-    const SavePrefix saveContext = BuildSaveContextPrefix();
+    const SaveCore saveContext = BuildSaveContextCore();
     uint32_t bytesRead = 0;
 
     for (; bytesRead < numBytes; ++bytesRead) {
