@@ -10,8 +10,6 @@
 namespace ShipwrightRA {
 namespace {
 
-bool developmentGameLoadStarted = false;
-
 void TryDevelopmentTokenLogin(RetroAchievementsManager& manager) {
     const char* username = std::getenv("SHIPWRIGHT_RA_USERNAME");
     const char* token = std::getenv("SHIPWRIGHT_RA_TOKEN");
@@ -31,33 +29,8 @@ void TryDevelopmentTokenLogin(RetroAchievementsManager& manager) {
     manager.BeginLoginWithToken(username, token);
 }
 
-void TryDevelopmentGameLoad(RetroAchievementsManager& manager) {
-    const char* romPath = std::getenv("SHIPWRIGHT_RA_ROM_PATH");
-    if (romPath == nullptr || romPath[0] == '\0') {
-        return;
-    }
-
-    // Start only with live gameplay state: rcheevos validates memory addresses
-    // during game activation and would disable scene-dependent achievements
-    // if the set were loaded while gPlayState is unavailable.
-    if (!manager.BeginLoadGameFromRomPath(romPath)) {
-        const std::string error = manager.GetLastGameError();
-        spdlog::error("[RetroAchievements] Failed to start ROM identification{}{}", error.empty() ? "" : ": ", error);
-    }
-}
-
 void ProcessRetroAchievementsFrame() {
-    auto& manager = RetroAchievementsManager::Instance();
-    manager.Idle();
-    // Title/file-select states also run this hook. Do not evaluate stale save
-    // data or invalidate scene-dependent achievements before gameplay starts.
-    if (GameInteractor::IsSaveLoaded()) {
-        if (!developmentGameLoadStarted && manager.GetAuthState() == RetroAchievementsAuthState::LoggedIn) {
-            developmentGameLoadStarted = true;
-            TryDevelopmentGameLoad(manager);
-        }
-        manager.DoFrame();
-    }
+    RetroAchievementsManager::Instance().ProcessGameFrame(GameInteractor::IsSaveLoaded());
 }
 
 void InitializeRetroAchievements() {
@@ -70,11 +43,13 @@ void InitializeRetroAchievements() {
 
     GameInteractor::Instance->RegisterGameHook<GameInteractor::OnLoadGame>(
         [](int32_t) { RetroAchievementsManager::Instance().ResetRuntime(); });
-    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnExitGame>([](int32_t) {
-        RetroAchievementsManager::Instance().UnloadGame();
-        developmentGameLoadStarted = false;
-    });
+    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnExitGame>(
+        [](int32_t) { RetroAchievementsManager::Instance().UnloadGame(); });
 
+    const char* romPath = std::getenv("SHIPWRIGHT_RA_ROM_PATH");
+    if (romPath != nullptr && romPath[0] != '\0') {
+        manager.SetRomPath(romPath);
+    }
     TryDevelopmentTokenLogin(manager);
 }
 

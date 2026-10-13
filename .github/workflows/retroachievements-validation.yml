@@ -29,6 +29,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential $(cat linux-build-deps/apt.txt)
 
+      - name: Configure compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ${{ runner.os }}-ra-validation
+          max-size: "2G"
+
       - name: Configure
         run: |
           cmake --no-warn-unused-cli \
@@ -36,7 +42,10 @@ jobs:
             -Bbuild-cmake \
             -GNinja \
             -DCMAKE_BUILD_TYPE:STRING=Release \
-            -DBUILD_REMOTE_CONTROL=1
+            -DBUILD_REMOTE_CONTROL=1 \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Test RA dependency linking
         run: |
@@ -54,6 +63,12 @@ jobs:
 
       - name: Compile RA memory adapter
         run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/N64MemoryAdapter.cpp.o
+
+      - name: Test native N64 memory mapping
+        run: python3 tests/retroachievements/run_memory_tests.py --build build-cmake
+
+      - name: Compile RA test panel
+        run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsWindow.cpp.o
 
       - name: Compile RA manager
         run: ninja -C build-cmake soh/CMakeFiles/soh.dir/soh/Enhancements/retroachievements/RetroAchievementsManager.cpp.o

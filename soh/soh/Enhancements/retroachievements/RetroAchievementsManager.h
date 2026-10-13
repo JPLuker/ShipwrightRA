@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <rc_client.h>
 
@@ -82,6 +83,17 @@ class RetroAchievementsManager final {
     void Idle();
     void ResetRuntime();
 
+    // Session-only test controls; never persist credentials or ROM paths.
+    void SetRomPath(std::string path);
+    [[nodiscard]] const std::string& GetRomPath() const;
+    void ProcessGameFrame(bool gameplayActive);
+    bool SetTestMode(bool enabled);
+    [[nodiscard]] bool IsTestMode() const;
+    [[nodiscard]] bool IsGameplayActive() const;
+    [[nodiscard]] uint64_t GetEvaluatedFrames() const;
+    [[nodiscard]] const std::vector<std::string>& GetRecentEvents() const;
+    [[nodiscard]] std::string GetDiagnosticReport() const;
+
   private:
     RetroAchievementsManager() = default;
     ~RetroAchievementsManager();
@@ -97,7 +109,14 @@ class RetroAchievementsManager final {
     void SetAuthState(RetroAchievementsAuthState state, std::string error = {});
     void SetGameState(RetroAchievementsGameState state, std::string error = {});
 
+    void RecordEvent(std::string text);
     rc_client_t* mClient = nullptr;
+    std::string mRomPath;
+    bool mTestMode = true;
+    bool mGameplayActive = false;
+    uint64_t mEvaluatedFrames = 0;
+    std::vector<uint32_t> mUnmappedAddresses;
+    std::vector<std::string> mRecentEvents;
     std::unique_ptr<RetroAchievementsHttp> mHttp;
 
     mutable std::mutex mAuthMutex;

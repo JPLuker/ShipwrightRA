@@ -118,7 +118,7 @@ See `docs/RA_MEMORY_MAP.md` for the compatibility notes and address derivations.
 - [x] Map current scene, dialog ID, and main BGM sequence
 - [x] Serialize inventory/equipment and event flag regions (gameplay parity validation pending)
 - [ ] Support all memory regions used by the existing 97-achievement base set
-- [ ] Add deterministic tests for mapped addresses
+- [x] Add deterministic tests against native Shipwright structures and original offsets
 
 ### Phase 0.6 - First real achievement
 
@@ -140,12 +140,12 @@ This is the main technical go/no-go checkpoint. If existing achievement definiti
 
 ### Phase 0.8 - Native UI
 
-- [ ] RetroAchievements settings section
-- [ ] connected account display
-- [ ] achievement list
+- [x] Session-only gameplay test panel under Settings → RetroAchievements
+- [x] Connected account display and password sign-in (no persistence)
+- [x] Test-panel achievement list including unsupported entries
 - [ ] unlock notifications
 - [ ] progress notifications
-- [ ] connection/error state
+- [x] Test-panel login/load errors and copyable diagnostics
 
 ### Phase 0.9 - Hardcore compatibility
 
@@ -202,9 +202,9 @@ Candidates include:
 
 The manager is created through `RegisterShipInitFunc`. It owns `rc_client` and a libcurl multi transport. Requests copy their inputs before returning; responses and rcheevos callbacks are dispatched on the game thread during idle processing. Shutdown cancels pending transfers and completes their callbacks before destroying the client. HTTP redirects are not followed, TLS verification uses libcurl defaults, and response bodies are capped at 16 MiB.
 
-Gameplay frames are evaluated only with an active normal save. Authentication and request retries continue at the title/file-select screens. Unlocks, completion, disconnect/reconnect, and server errors currently go to the Shipwright log. Hardcore remains disabled.
+Gameplay frames are evaluated only with an active normal save. Authentication and request retries continue at the title/file-select screens. Unlocks, completion, disconnect/reconnect, and server errors currently go to the Shipwright log. Hardcore remains disabled. Test mode defaults on: triggers are evaluated without account submissions. Stop the session before explicitly choosing softcore submission mode.
 
-The memory adapter remains sparse. Unsupported addresses return invalid reads; this can disable achievements that use still-unmapped fields. No claim of full set support, official support, or a verified real unlock is made yet. Native account UI, secure token persistence, automatic ROM discovery, save-state handling, and complete memory coverage remain unfinished.
+The memory adapter remains sparse. Unsupported addresses return invalid reads; this can disable achievements that use still-unmapped fields. No claim of full set support, official support, or a verified real unlock is made yet. The session-only gameplay test panel provides password sign-in, ROM selection, achievement groups, recent triggers, and copyable diagnostics. Secure token persistence, automatic ROM discovery, save-state handling, and complete memory coverage remain unfinished.
 
 ### Automated validation
 
@@ -218,7 +218,7 @@ The tests use only a local loopback server, synthetic request data, and no accou
 
 ### Build integration follow-up
 
-Full desktop builds reached the final link, then exposed an MD5 symbol collision with StormLib on Linux/macOS and a Windows CRT mismatch. The rcheevos target now privately prefixes its MD5 functions and uses the same static MSVC runtime as Shipwright. A small link regression test uses the actual CMake dependency target, a competing `md5_init` symbol, and a known digest so this failure is caught before the full game build. Full desktop rebuilds must confirm the fixes.
+Full desktop builds reached the final link, then exposed an MD5 symbol collision with StormLib on Linux/macOS and a Windows CRT mismatch. The rcheevos target now privately prefixes its MD5 functions and uses the same static MSVC runtime as Shipwright. A small link regression test uses the actual CMake dependency target, a competing `md5_init` symbol, and a known digest so this failure is caught before the full game build. The dedicated full Linux validation build passed for `87916d4e`; the desktop package builds are tracked separately.
 
 ### Next validation checkpoint
 
@@ -226,3 +226,7 @@ Full desktop builds reached the final link, then exposed an MD5 symbol collision
 2. Launch with a user-owned supported ROM and client login token; verify login and game ID in the log.
 3. Enter a normal save and inspect which achievements rcheevos marks unsupported.
 4. Compare one existing achievement against an RA-supported emulator before expanding the UI.
+
+## Gameplay test entry point
+
+Use **Settings → RetroAchievements → Open gameplay test panel**. See [RA_GAMEPLAY_TESTING.md](RA_GAMEPLAY_TESTING.md) for the ordered checklist and emulator comparison. Credentials and ROM paths are session-only. The environment hooks remain available, with Test mode enabled by default.

@@ -12,6 +12,18 @@ from urllib.parse import parse_qs
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    awards = 0
+    test_set = {
+        'Success': True, 'GameId': 1234, 'Title': 'Synthetic N64 test', 'ConsoleId': 2,
+        'ImageIconUrl': 'http://localhost/test.png', 'RichPresenceGameId': 1234, 'RichPresencePatch': '',
+        'Sets': [{'AchievementSetId': 1111, 'GameId': 1234, 'Title': None, 'Type': 'core',
+                  'ImageIconUrl': 'http://localhost/test.png', 'Leaderboards': [],
+                  'Achievements': [{'ID': aid, 'Title': title, 'Description': 'Synthetic test condition',
+                                    'Flags': 3, 'Points': 5, 'MemAddr': mem, 'Author': 'Test',
+                                    'BadgeName': '00000', 'Created': 1367266583, 'Modified': 1376929305}
+                                   for aid, title, mem in ((5501, 'Mapped', '0xH0000=1'),
+                                                           (5502, 'Unsupported', '0xH0100=1'))]}]}
+
     def log_message(self, *args):
         pass
 
@@ -26,13 +38,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         status = 200
         if self.path == '/dorequest.php':
             fields = parse_qs(body.decode())
-            assert fields.get('r') == ['login2']
-            user = fields['u'][0]
-            if user in ('stale', 'shutdown'):
-                time.sleep(0.3)
-            result = {'Success': False, 'Error': 'Invalid test credentials'} if user == 'invalid' else {
-                'Success': True, 'User': user, 'Token': 'synthetic',
-                'Score': 0, 'SoftcoreScore': 0, 'Messages': 0}
+            api = fields['r'][0]
+            if api == 'login2':
+                user = fields['u'][0]
+                if user in ('stale', 'shutdown'):
+                    time.sleep(0.3)
+                result = {'Success': False, 'Error': 'Invalid test credentials'} if user == 'invalid' else {
+                    'Success': True, 'User': user, 'Token': 'synthetic',
+                    'Score': 0, 'SoftcoreScore': 0, 'Messages': 0}
+            elif api == 'achievementsets':
+                result = self.test_set
+            elif api == 'startsession':
+                assert type(self).awards == 0, 'Test mode submitted an unlock'
+                result = {'Success': True, 'Unlocks': [], 'HardcoreUnlocks': []}
+            elif api == 'awardachievement':
+                type(self).awards += 1
+                result = {'Success': True, 'AchievementID': 5501, 'Score': 0, 'SoftcoreScore': 5,
+                          'AchievementsRemaining': 1}
+            else:
+                result = {'Success': True}
             body = json.dumps(result).encode()
         if self.path == '/slow':
             time.sleep(0.3)
@@ -100,7 +124,11 @@ def main():
                                 str(root / 'tests/retroachievements/manager_lifecycle.cpp'),
                                 *objects, *(['-DSPDLOG_FMT_EXTERNAL', '-lfmt'] if args.fmt_external else []),
                                 '-lcurl', '-o', str(exe)], check=True)
-                subprocess.run([str(exe), f'http://127.0.0.1:{server.server_port}'], check=True, timeout=15)
+                rom = Path(temp) / 'synthetic.z64'
+                rom.write_bytes(bytes.fromhex('80371240') + bytes(65532))
+                subprocess.run([str(exe), f'http://127.0.0.1:{server.server_port}', str(rom)], check=True, timeout=15)
+                assert Handler.awards == 1, f'Expected only the explicit softcore test submission, got {Handler.awards}'
+
     finally:
         server.shutdown()
         server.server_close()

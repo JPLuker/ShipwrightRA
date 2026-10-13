@@ -4,6 +4,9 @@
 #include "RetroAchievementsHttp.h"
 
 #include <string>
+#include <algorithm>
+#include <iomanip>
+#include <sstream>
 #include <utility>
 
 #include <rc_hash.h>
@@ -63,6 +66,7 @@ bool RetroAchievementsManager::Initialize() {
     // permissive until ShipwrightRA can enforce the full Hardcore restriction
     // contract (cheats, save states, speed controls, etc.).
     rc_client_set_hardcore_enabled(mClient, 0);
+    rc_client_set_spectator_mode_enabled(mClient, mTestMode ? 1 : 0);
 
     SetAuthState(RetroAchievementsAuthState::LoggedOut);
     SetGameState(RetroAchievementsGameState::Unloaded);
@@ -113,14 +117,14 @@ bool RetroAchievementsManager::BeginLoginWithPassword(const std::string& usernam
         SetAuthState(RetroAchievementsAuthState::Failed, "RetroAchievements client is not initialized");
         return false;
     }
+    if (GetAuthState() == RetroAchievementsAuthState::Authenticating) {
+        return false;
+    }
     if (username.empty() || password.empty()) {
         SetAuthState(RetroAchievementsAuthState::Failed, "Username and password are required");
         return false;
     }
 
-    if (GetAuthState() == RetroAchievementsAuthState::Authenticating) {
-        return false;
-    }
     SetAuthState(RetroAchievementsAuthState::Authenticating);
     const rc_client_async_handle_t* handle = rc_client_begin_login_with_password(
         mClient, username.c_str(), password.c_str(), &RetroAchievementsManager::LoginCallback, this);
@@ -139,14 +143,14 @@ bool RetroAchievementsManager::BeginLoginWithToken(const std::string& username, 
         SetAuthState(RetroAchievementsAuthState::Failed, "RetroAchievements client is not initialized");
         return false;
     }
+    if (GetAuthState() == RetroAchievementsAuthState::Authenticating) {
+        return false;
+    }
     if (username.empty() || token.empty()) {
         SetAuthState(RetroAchievementsAuthState::Failed, "Username and token are required");
         return false;
     }
 
-    if (GetAuthState() == RetroAchievementsAuthState::Authenticating) {
-        return false;
-    }
     SetAuthState(RetroAchievementsAuthState::Authenticating);
     const rc_client_async_handle_t* handle = rc_client_begin_login_with_token(
         mClient, username.c_str(), token.c_str(), &RetroAchievementsManager::LoginCallback, this);
@@ -224,6 +228,9 @@ bool RetroAchievementsManager::BeginLoadGameFromRomPath(const std::string& romPa
         return false;
     }
 
+    mEvaluatedFrames = 0;
+    mUnmappedAddresses.clear();
+    mRecentEvents.clear();
     spdlog::info("[RetroAchievements] Loading N64 game for hash {}", *hash);
     SetGameState(RetroAchievementsGameState::Loading);
 
@@ -278,6 +285,101 @@ std::optional<RetroAchievementsGameInfo> RetroAchievementsManager::GetGameInfo()
     return info;
 }
 
+void RetroAchievementsManager::SetRomPath(std::string path) {
+    UnloadGame();
+    mRomPath = std::move(path);
+}
+
+const std::string& RetroAchievementsManager::GetRomPath() const {
+    return mRomPath;
+}
+
+void RetroAchievementsManager::ProcessGameFrame(bool gameplayActive) {
+    mGameplayActive = gameplayActive;
+    // Activation validates memory while processing HTTP responses. If gameplay
+    // disappears during a load, cancel before pumping those responses.
+    if (!gameplayActive && GetGameState() == RetroAchievementsGameState::Loading) {
+        UnloadGame();
+    }
+    Idle();
+    if (gameplayActive) {
+        if (GetAuthState() == RetroAchievementsAuthState::LoggedIn &&
+            GetGameState() == RetroAchievementsGameState::Unloaded && !mRomPath.empty()) {
+            BeginLoadGameFromRomPath(mRomPath);
+        }
+        DoFrame();
+    }
+}
+
+bool RetroAchievementsManager::SetTestMode(bool enabled) {
+    const auto state = GetGameState();
+    if (state == RetroAchievementsGameState::Loading || state == RetroAchievementsGameState::Loaded) {
+        return false;
+    }
+    mTestMode = enabled;
+    if (mClient != nullptr) {
+        rc_client_set_spectator_mode_enabled(mClient, enabled ? 1 : 0);
+    }
+    return true;
+}
+
+bool RetroAchievementsManager::IsTestMode() const {
+    return mTestMode;
+}
+bool RetroAchievementsManager::IsGameplayActive() const {
+    return mGameplayActive;
+}
+uint64_t RetroAchievementsManager::GetEvaluatedFrames() const {
+    return mEvaluatedFrames;
+}
+const std::vector<std::string>& RetroAchievementsManager::GetRecentEvents() const {
+    return mRecentEvents;
+}
+
+void RetroAchievementsManager::RecordEvent(std::string text) {
+    if (mRecentEvents.size() == 32) {
+        mRecentEvents.erase(mRecentEvents.begin());
+    }
+    mRecentEvents.push_back(std::move(text));
+}
+
+std::string RetroAchievementsManager::GetDiagnosticReport() const {
+    std::ostringstream report;
+    report << "ShipwrightRA gameplay test\nMode: " << (mTestMode ? "Test (no submissions)" : "Softcore submissions")
+           << "\nHardcore: disabled\nGameplay active: " << (mGameplayActive ? "yes" : "no")
+           << "\nEvaluated frames: " << mEvaluatedFrames << "\n";
+    const auto game = GetGameInfo();
+    if (game) {
+        report << "Game: " << game->title << " (" << game->id << ")\nROM hash: " << game->hash << "\n";
+        auto* list = rc_client_create_achievement_list(mClient, RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE,
+                                                       RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_LOCK_STATE);
+        if (list != nullptr) {
+            for (uint32_t i = 0; i < list->num_buckets; ++i) {
+                const auto& bucket = list->buckets[i];
+                report << (bucket.label != nullptr ? bucket.label : "Achievements") << ": " << bucket.num_achievements
+                       << "\n";
+                if (bucket.bucket_type == RC_CLIENT_ACHIEVEMENT_BUCKET_UNSUPPORTED) {
+                    for (uint32_t j = 0; j < bucket.num_achievements; ++j) {
+                        const auto* achievement = bucket.achievements[j];
+                        report << "  " << achievement->id << " "
+                               << (achievement->title != nullptr ? achievement->title : "Unknown") << "\n";
+                    }
+                }
+            }
+            rc_client_destroy_achievement_list(list);
+        }
+    }
+    report << "Unmapped RA addresses (first 64 unique):";
+    for (const uint32_t address : mUnmappedAddresses) {
+        report << " 0x" << std::hex << std::setw(6) << std::setfill('0') << address;
+    }
+    report << "\nRecent events:\n";
+    for (const auto& event : mRecentEvents) {
+        report << event << "\n";
+    }
+    return report.str();
+}
+
 void RetroAchievementsManager::Idle() {
     if (mClient == nullptr) {
         return;
@@ -298,12 +400,23 @@ void RetroAchievementsManager::DoFrame() {
     }
 
     rc_client_do_frame(mClient);
+    ++mEvaluatedFrames;
 }
 
 uint32_t RC_CCONV RetroAchievementsManager::ReadMemory(uint32_t address, uint8_t* buffer, uint32_t numBytes,
                                                        rc_client_t* client) {
-    (void)client;
-    return N64MemoryAdapter::Read(address, buffer, numBytes);
+    const uint32_t count = N64MemoryAdapter::Read(address, buffer, numBytes);
+    if (count != numBytes && client != nullptr) {
+        auto* manager = static_cast<RetroAchievementsManager*>(rc_client_get_userdata(client));
+        if (manager != nullptr && manager->mUnmappedAddresses.size() < 64) {
+            const uint32_t failedAddress = address + count;
+            auto& addresses = manager->mUnmappedAddresses;
+            if (std::find(addresses.begin(), addresses.end(), failedAddress) == addresses.end()) {
+                addresses.push_back(failedAddress);
+            }
+        }
+    }
+    return count;
 }
 
 void RC_CCONV RetroAchievementsManager::ServerCall(const rc_api_request_t* request,
@@ -376,7 +489,8 @@ void RC_CCONV RetroAchievementsManager::LoadGameCallback(int result, const char*
 }
 
 void RC_CCONV RetroAchievementsManager::EventHandler(const rc_client_event_t* event, rc_client_t* client) {
-    (void)client;
+    auto* manager =
+        client != nullptr ? static_cast<RetroAchievementsManager*>(rc_client_get_userdata(client)) : nullptr;
 
     if (event == nullptr) {
         return;
@@ -385,7 +499,14 @@ void RC_CCONV RetroAchievementsManager::EventHandler(const rc_client_event_t* ev
     switch (event->type) {
         case RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED:
             if (event->achievement != nullptr) {
-                spdlog::info("[RetroAchievements] Achievement unlocked: {} ({}) - {} points",
+                if (manager != nullptr) {
+                    manager->RecordEvent(
+                        std::string(manager->mTestMode ? "Test trigger: " : "Unlock trigger: ") +
+                        std::to_string(event->achievement->id) + " - " +
+                        (event->achievement->title != nullptr ? event->achievement->title : "Unknown"));
+                }
+                spdlog::info("[RetroAchievements] {}: {} ({}) - {} points",
+                             manager != nullptr && manager->IsTestMode() ? "Test trigger" : "Unlock trigger",
                              event->achievement->title != nullptr ? event->achievement->title : "Unknown",
                              event->achievement->id, event->achievement->points);
             } else {
@@ -402,6 +523,9 @@ void RC_CCONV RetroAchievementsManager::EventHandler(const rc_client_event_t* ev
             }
             break;
         case RC_CLIENT_EVENT_SERVER_ERROR:
+            if (manager != nullptr) {
+                manager->RecordEvent("Server error: inspect the application log for details");
+            }
             if (event->server_error != nullptr) {
                 spdlog::warn("[RetroAchievements] Server error in {}: {}",
                              event->server_error->api != nullptr ? event->server_error->api : "unknown API",
@@ -412,9 +536,15 @@ void RC_CCONV RetroAchievementsManager::EventHandler(const rc_client_event_t* ev
             }
             break;
         case RC_CLIENT_EVENT_DISCONNECTED:
+            if (manager != nullptr) {
+                manager->RecordEvent("Disconnected: submissions pending");
+            }
             spdlog::warn("[RetroAchievements] Disconnected; unlock submissions are pending");
             break;
         case RC_CLIENT_EVENT_RECONNECTED:
+            if (manager != nullptr) {
+                manager->RecordEvent("Reconnected: pending submissions completed");
+            }
             spdlog::info("[RetroAchievements] Reconnected; pending submissions completed");
             break;
         default:
