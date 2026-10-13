@@ -216,6 +216,10 @@ python3 tests/retroachievements/run_http_tests.py --rcheevos build-cmake/_deps/s
 
 The tests use only a local loopback server, synthetic request data, and no account or ROM. They cover delayed responses without blocking enqueue, POST/URL ownership, chained callbacks, HTTP status propagation, redirect refusal, response limits, shutdown, reinitialization, and the no-curl fallback. The workflow also runs manager lifecycle tests against the real rcheevos runtime using a local mock login API: successful/failed login, duplicate login, logout during an outstanding request, replacement login, shutdown, and reinitialization. Pass `--spdlog /path/to/spdlog` to run these locally; distro spdlog packages may also need `--fmt-external`. These tests are not proof of in-game achievement correctness.
 
+### Build integration follow-up
+
+Full desktop builds reached the final link, then exposed an MD5 symbol collision with StormLib on Linux/macOS and a Windows CRT mismatch. The rcheevos target now privately prefixes its MD5 functions and uses the same static MSVC runtime as Shipwright. A small link regression test uses the actual CMake dependency target, a competing `md5_init` symbol, and a known digest so this failure is caught before the full game build. Full desktop rebuilds must confirm the fixes.
+
 ### Next validation checkpoint
 
 1. Get the full Linux build green; inspect the desktop build matrix independently.

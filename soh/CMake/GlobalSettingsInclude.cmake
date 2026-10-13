@@ -43,6 +43,11 @@ target_include_directories(shipwright_ra_rcheevos PUBLIC
 target_compile_definitions(shipwright_ra_rcheevos
     PRIVATE
         RC_DISABLE_LUA
+        # StormLib also exports md5_init with a different implementation.
+        # Namespace every rcheevos MD5 entry point, including its callers.
+        md5_init=shipwright_ra_md5_init
+        md5_append=shipwright_ra_md5_append
+        md5_finish=shipwright_ra_md5_finish
     PUBLIC
         # Consumers need this definition too so rc_client.h exposes the
         # identify-and-load hashing API used by the upcoming ROM detection phase.
@@ -51,6 +56,17 @@ target_compile_definitions(shipwright_ra_rcheevos
 set_target_properties(shipwright_ra_rcheevos PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
+
+if(MSVC)
+    # Match soh and its static vcpkg dependencies (/MT, or /MTd for Debug).
+    # The default /MD imports CRT symbols that the final executable excludes.
+    set_target_properties(shipwright_ra_rcheevos PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+    )
+    target_compile_definitions(shipwright_ra_rcheevos PRIVATE
+        $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
+    )
+endif()
 
 # GlobalSettingsInclude.cmake is evaluated before the soh target is created.
 # link_libraries applies dependencies to targets created below this point

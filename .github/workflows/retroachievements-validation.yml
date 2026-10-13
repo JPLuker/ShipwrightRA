@@ -38,6 +38,14 @@ jobs:
             -DCMAKE_BUILD_TYPE:STRING=Release \
             -DBUILD_REMOTE_CONTROL=1
 
+      - name: Test RA dependency linking
+        run: |
+          cmake -S tests/retroachievements/link-smoke -B build-ra-link-smoke \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFETCHCONTENT_SOURCE_DIR_SHIPWRIGHT_RA_RCHEEVOS_SOURCE="$PWD/build-cmake/_deps/shipwright_ra_rcheevos_source-src"
+          cmake --build build-ra-link-smoke -j3
+          ctest --test-dir build-ra-link-smoke --output-on-failure
+
       - name: Test RA HTTP transport and manager lifecycle
         run: python3 tests/retroachievements/run_http_tests.py --rcheevos build-cmake/_deps/shipwright_ra_rcheevos_source-src --spdlog /usr --fmt-external
 
