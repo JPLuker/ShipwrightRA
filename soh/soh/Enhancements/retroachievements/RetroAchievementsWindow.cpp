@@ -167,9 +167,20 @@ class RetroAchievementsWindow final : public Ship::GuiWindow {
 
         if (ImGui::CollapsingHeader("Memory bridge probes", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::TextWrapped("These are the exact RA-facing values reconstructed from native Shipwright state. "
-                               "Change health/rupees or move scenes and confirm the values follow gameplay.");
+                               "Change health/rupees, equip or use an item, advance progression, and move scenes to "
+                               "confirm the values follow gameplay.");
+            ImGui::TextUnformatted("Save / inventory state");
             DrawMemoryProbe("Health", 0x11A602, 2);
             DrawMemoryProbe("Rupees", 0x11A606, 2);
+            DrawMemoryProbe("Equipped equipment", 0x11A642, 2);
+            DrawMemoryProbe("Inventory slot 0", 0x11A647, 1);
+            DrawMemoryProbe("Upgrades", 0x11A670, 4);
+            DrawMemoryProbe("Quest items", 0x11A674, 4);
+            DrawMemoryProbe("Event flags word 0", 0x11B4A6, 2);
+            DrawMemoryProbe("Item-get flags word 0", 0x11B4C2, 2);
+            DrawMemoryProbe("Info flags word 0", 0x11B4CA, 2);
+            ImGui::Separator();
+            ImGui::TextUnformatted("Live gameplay state");
             DrawMemoryProbe("Scene", 0x1C8546, 1);
             DrawMemoryProbe("Dialog ID", 0x1D8872, 2);
             DrawMemoryProbe("Main BGM", 0x124E54, 2);
