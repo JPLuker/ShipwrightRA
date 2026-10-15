@@ -1,8 +1,10 @@
 #include "RetroAchievementsManager.h"
+#include "N64MemoryAdapter.h"
 
 #include <array>
 #include <cstdio>
 #include <memory>
+#include <optional>
 
 #include <ship/Context.h>
 #include <ship/window/Window.h>
@@ -25,6 +27,32 @@ extern std::shared_ptr<SohMenu> mSohMenu;
 
 namespace ShipwrightRA {
 namespace {
+
+std::optional<uint32_t> ReadMemoryProbe(uint32_t address, uint32_t width) {
+    if (width == 0 || width > sizeof(uint32_t)) {
+        return std::nullopt;
+    }
+
+    std::array<uint8_t, sizeof(uint32_t)> bytes{};
+    if (N64MemoryAdapter::Read(address, bytes.data(), width) != width) {
+        return std::nullopt;
+    }
+
+    uint32_t value = 0;
+    for (uint32_t i = 0; i < width; ++i) {
+        value |= static_cast<uint32_t>(bytes[i]) << (8U * i);
+    }
+    return value;
+}
+
+void DrawMemoryProbe(const char* label, uint32_t address, uint32_t width) {
+    const auto value = ReadMemoryProbe(address, width);
+    if (value.has_value()) {
+        ImGui::Text("%s: %u (0x%X)", label, static_cast<unsigned>(*value), static_cast<unsigned>(*value));
+    } else {
+        ImGui::Text("%s: unmapped", label);
+    }
+}
 
 class RetroAchievementsWindow final : public Ship::GuiWindow {
   public:
@@ -136,6 +164,17 @@ class RetroAchievementsWindow final : public Ship::GuiWindow {
         }
         ImGui::Text("Gameplay: %s | Evaluated frames: %llu", manager.IsGameplayActive() ? "active" : "waiting",
                     static_cast<unsigned long long>(manager.GetEvaluatedFrames()));
+
+        if (ImGui::CollapsingHeader("Memory bridge probes", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextWrapped("These are the exact RA-facing values reconstructed from native Shipwright state. "
+                               "Change health/rupees or move scenes and confirm the values follow gameplay.");
+            DrawMemoryProbe("Health", 0x11A602, 2);
+            DrawMemoryProbe("Rupees", 0x11A606, 2);
+            DrawMemoryProbe("Scene", 0x1C8546, 1);
+            DrawMemoryProbe("Dialog ID", 0x1D8872, 2);
+            DrawMemoryProbe("Main BGM", 0x124E54, 2);
+        }
+
         if (ImGui::Button("Copy diagnostic report")) {
             ImGui::SetClipboardText(manager.GetDiagnosticReport().c_str());
         }
