@@ -2,6 +2,21 @@
 
 Use a build from `feature/retroachievements` containing the RetroAchievements test panel. The current integration is experimental. A successful build and synthetic runtime tests do not establish compatibility with the existing OoT achievement set.
 
+## Fast path for tonight
+
+If you only have time for one pass, do these in order:
+
+1. Build or download the latest `feature/retroachievements` build and launch with your normal Ship of Harkinian assets.
+2. Open **Settings → RetroAchievements → Open gameplay test panel**.
+3. Leave **Test mode - do not submit unlocks** enabled.
+4. Sign in, choose your original NTSC-U 1.0 OoT ROM, and press **Use ROM / reload set**.
+5. Enter a normal save. Confirm the panel shows **Ocarina of Time**, an achievement list, and an evaluated-frame counter that continuously increases.
+6. Walk between two scenes, take or recover some health, change your rupee count, and equip/use at least one normal inventory item. These exercise the highest-confidence mapped state before actor/boss memory is involved.
+7. Try one simple early-game achievement condition that does not depend on a specific boss actor. In Test mode, a successful evaluation should create a **Test trigger** event but should not unlock anything on your RA account.
+8. Before exiting the save, press **Copy diagnostic report** and save the text somewhere. If anything is wrong, that report plus the exact action you were taking is the most useful result to bring back.
+
+Stop the test immediately if the resolved game is not Ocarina of Time, gameplay freezes during sign-in/set loading, evaluated frames remain at zero while a save is active, or the same unmapped address repeats around an otherwise simple condition.
+
 ## Start a session
 
 1. Launch with your existing game assets. Keep your original save backed up; start with a normal vanilla save, default game speed, and no cheats, randomizer, or save states. Start with NTSC-U 1.0 for the first parity comparison: the adapter currently reconstructs that memory layout.
