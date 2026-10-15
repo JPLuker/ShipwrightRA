@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <rc_client.h>
@@ -115,7 +116,7 @@ class RetroAchievementsManager final {
     bool mTestMode = true;
     bool mGameplayActive = false;
     uint64_t mEvaluatedFrames = 0;
-    std::vector<uint32_t> mUnmappedAddresses;
+    std::vector<std::pair<uint32_t, uint64_t>> mUnmappedAddresses;
     std::vector<std::string> mRecentEvents;
     std::unique_ptr<RetroAchievementsHttp> mHttp;
 

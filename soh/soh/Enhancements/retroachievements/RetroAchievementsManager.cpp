@@ -369,9 +369,10 @@ std::string RetroAchievementsManager::GetDiagnosticReport() const {
             rc_client_destroy_achievement_list(list);
         }
     }
-    report << "Unmapped RA addresses (first 64 unique):";
-    for (const uint32_t address : mUnmappedAddresses) {
-        report << " 0x" << std::hex << std::setw(6) << std::setfill('0') << address;
+    report << "Unmapped RA addresses (first 64 unique; failed-read counts):";
+    for (const auto& entry : mUnmappedAddresses) {
+        report << " 0x" << std::hex << std::setw(6) << std::setfill('0') << entry.first << std::dec << " ("
+               << entry.second << "x)";
     }
     report << "\nRecent events:\n";
     for (const auto& event : mRecentEvents) {
@@ -408,11 +409,16 @@ uint32_t RC_CCONV RetroAchievementsManager::ReadMemory(uint32_t address, uint8_t
     const uint32_t count = N64MemoryAdapter::Read(address, buffer, numBytes);
     if (count != numBytes && client != nullptr) {
         auto* manager = static_cast<RetroAchievementsManager*>(rc_client_get_userdata(client));
-        if (manager != nullptr && manager->mUnmappedAddresses.size() < 64) {
+        if (manager != nullptr) {
             const uint32_t failedAddress = address + count;
             auto& addresses = manager->mUnmappedAddresses;
-            if (std::find(addresses.begin(), addresses.end(), failedAddress) == addresses.end()) {
-                addresses.push_back(failedAddress);
+            const auto existing = std::find_if(addresses.begin(), addresses.end(), [failedAddress](const auto& entry) {
+                return entry.first == failedAddress;
+            });
+            if (existing != addresses.end()) {
+                ++existing->second;
+            } else if (addresses.size() < 64) {
+                addresses.emplace_back(failedAddress, 1);
             }
         }
     }
